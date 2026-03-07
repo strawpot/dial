@@ -11,6 +11,9 @@ license = "MIT"
 requires-python = ">=3.11"
 dependencies = ["strawpot @ git+https://github.com/strawpot/strawpot.git@main#subdirectory=cli"]
 
+[tool.hatch.metadata]
+allow-direct-references = true
+
 [project.urls]
 Homepage = "https://github.com/strawpot/dial"
 

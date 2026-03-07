@@ -4,8 +4,7 @@ description: Default file-based memory provider for StrawPot
 metadata:
   version: "0.1.0"
   strawpot:
-    pip: dial-memory
-    memory_module: dial_memory.provider
+    memory_module: provider.py
     params:
       storage_dir:
         type: string

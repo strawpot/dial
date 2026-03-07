@@ -4,7 +4,7 @@ description: Default file-based memory provider for StrawPot
 metadata:
   version: "0.1.0"
   strawpot:
-    memory_module: dial_memory/provider.py
+    memory_module: provider.py
     params:
       storage_dir:
         type: string
@@ -35,5 +35,3 @@ Default file-based memory provider for StrawPot. Zero external dependencies.
 Two memory layers:
 - **Event Memory (EM)** — automatic session history (append-only JSONL per session)
 - **Knowledge Store (SM + RM)** — facts and domain knowledge at three scopes (global, project, role)
-
-See [DESIGN.md](DESIGN.md) for architecture details.

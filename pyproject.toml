@@ -18,7 +18,7 @@ Homepage = "https://github.com/strawpot/dial"
 dev = ["pytest>=8.0", "pytest-cov"]
 
 [tool.hatch.build.targets.wheel]
-packages = ["dial_memory"]
+packages = ["dial"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

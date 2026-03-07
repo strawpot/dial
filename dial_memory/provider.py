@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from strawpot.memory.protocol import (
+from strawpot_memory.memory_protocol import (
     ContextCard,
     ControlSignal,
     DumpReceipt,

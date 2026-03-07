@@ -2,7 +2,7 @@
 
 import json
 
-from strawpot.memory.protocol import MemoryKind, MemoryProvider, RememberResult
+from strawpot_memory.memory_protocol import MemoryKind, MemoryProvider, RememberResult
 
 from dial_memory.provider import DialMemoryProvider
 from dial_memory.storage import knowledge_path, read_jsonl, role_knowledge_path

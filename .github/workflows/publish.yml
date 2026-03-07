@@ -56,11 +56,9 @@ jobs:
           git tag "${{ steps.version.outputs.tag }}"
           git push origin "${{ steps.version.outputs.tag }}"
 
-      - name: Update version in pyproject.toml and MEMORY.md
+      - name: Update version in pyproject.toml
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          sed -i "s/^version = .*/version = \"${VERSION}\"/" pyproject.toml
-          sed -i "s/^  version: .*/  version: \"${VERSION}\"/" dial_memory/MEMORY.md
+          sed -i "s/^version = .*/version = \"${{ steps.version.outputs.version }}\"/" pyproject.toml
 
       - name: Build package
         run: |
@@ -82,7 +80,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -b "${BRANCH}"
-          git add pyproject.toml dial_memory/MEMORY.md
+          git add pyproject.toml
           git commit -m "Bump version to ${VERSION}" || exit 0
           git push origin "${BRANCH}"
           gh pr create --title "Bump version to ${VERSION}" \

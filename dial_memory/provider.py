@@ -18,12 +18,14 @@ from strawpot.memory.protocol import (
 from .scorer import score_and_filter
 from .storage import (
     append_jsonl,
+    count_lines,
     em_path,
     expand_path,
     knowledge_path,
     read_jsonl,
     read_jsonl_tail,
     role_knowledge_path,
+    truncate_jsonl,
 )
 
 
@@ -43,6 +45,7 @@ class DialMemoryProvider:
         self._em_tail_count: int = int(cfg.get("em_tail_count", 20))
         self._em_max_events: int = int(cfg.get("em_max_events", 10000))
         self._rm_min_score: float = float(cfg.get("rm_min_score", 0.3))
+        self._known_contents: dict[str, set[str]] = {}  # path -> content set
 
     # -- get ------------------------------------------------------------------
 
@@ -142,7 +145,13 @@ class DialMemoryProvider:
                 "summary": output[:500] if output else "",
             },
         }
-        append_jsonl(em_path(self._storage_dir, session_id), event)
+        path = em_path(self._storage_dir, session_id)
+        append_jsonl(path, event)
+
+        # Rotate if EM file exceeds max events
+        if count_lines(path) > self._em_max_events:
+            truncate_jsonl(path, self._em_max_events)
+
         return DumpReceipt(em_event_ids=[event_id])
 
     # -- remember -------------------------------------------------------------
@@ -159,12 +168,18 @@ class DialMemoryProvider:
     ) -> RememberResult:
         kw = keywords or []
         store_path = self._knowledge_store_path(scope, role)
+        cache_key = str(store_path)
+
+        # Build content cache on first access for this path
+        if cache_key not in self._known_contents:
+            existing = read_jsonl(store_path)
+            self._known_contents[cache_key] = {
+                e.get("content", "") for e in existing
+            }
 
         # Dedup: exact content match
-        existing = read_jsonl(store_path)
-        for entry in existing:
-            if entry.get("content") == content:
-                return RememberResult(status="duplicate", entry_id=entry.get("entry_id", ""))
+        if content in self._known_contents[cache_key]:
+            return RememberResult(status="duplicate", entry_id="")
 
         entry_id = _make_id("k")
         entry = {
@@ -175,6 +190,7 @@ class DialMemoryProvider:
             "ts": _now_iso(),
         }
         append_jsonl(store_path, entry)
+        self._known_contents[cache_key].add(content)
         return RememberResult(status="accepted", entry_id=entry_id)
 
     # -- internal helpers -----------------------------------------------------

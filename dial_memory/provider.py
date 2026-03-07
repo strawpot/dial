@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,40 +15,16 @@ from strawpot.memory.protocol import (
     RememberResult,
 )
 
-try:
-    from .scorer import score_and_filter
-    from .storage import (
-        append_jsonl,
-        em_path,
-        expand_path,
-        knowledge_path,
-        read_jsonl,
-        read_jsonl_tail,
-        role_knowledge_path,
-    )
-except ImportError:
-    # When loaded standalone via importlib.util.spec_from_file_location
-    # (strawpot registry), relative imports fail. Load siblings by path.
-    import importlib.util as _ilu
-    _here = Path(__file__).resolve().parent
-
-    def _load_sibling(name: str):
-        spec = _ilu.spec_from_file_location(name, _here / f"{name}.py")
-        mod = _ilu.module_from_spec(spec)
-        spec.loader.exec_module(mod)  # type: ignore[union-attr]
-        return mod
-
-    _scorer = _load_sibling("scorer")
-    score_and_filter = _scorer.score_and_filter
-
-    _storage = _load_sibling("storage")
-    append_jsonl = _storage.append_jsonl
-    em_path = _storage.em_path
-    expand_path = _storage.expand_path
-    knowledge_path = _storage.knowledge_path
-    read_jsonl = _storage.read_jsonl
-    read_jsonl_tail = _storage.read_jsonl_tail
-    role_knowledge_path = _storage.role_knowledge_path
+from .scorer import score_and_filter
+from .storage import (
+    append_jsonl,
+    em_path,
+    expand_path,
+    knowledge_path,
+    read_jsonl,
+    read_jsonl_tail,
+    role_knowledge_path,
+)
 
 
 class DialMemoryProvider:

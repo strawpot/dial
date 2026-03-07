@@ -1,6 +1,6 @@
 """Tests for dial_memory.storage."""
 
-from dial.storage import (
+from dial_memory.storage import (
     append_jsonl,
     em_path,
     expand_path,

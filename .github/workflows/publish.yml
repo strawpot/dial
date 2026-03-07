@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "dial_memory/**"
+      - "dial/**"
+      - "pyproject.toml"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version override (e.g. 0.2.0). Leave empty for auto patch bump."
+        required: false
+
+permissions:
+  id-token: write
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "tag=v${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            LATEST=$(git tag --list 'v*' --sort=-v:refname | head -n1)
+            if [ -z "$LATEST" ]; then
+              echo "version=0.1.0" >> "$GITHUB_OUTPUT"
+              echo "tag=v0.1.0" >> "$GITHUB_OUTPUT"
+            else
+              MAJOR=$(echo "$LATEST" | sed 's/^v//' | cut -d. -f1)
+              MINOR=$(echo "$LATEST" | sed 's/^v//' | cut -d. -f2)
+              PATCH=$(echo "$LATEST" | sed 's/^v//' | cut -d. -f3)
+              NEW_PATCH=$((PATCH + 1))
+              echo "version=${MAJOR}.${MINOR}.${NEW_PATCH}" >> "$GITHUB_OUTPUT"
+              echo "tag=v${MAJOR}.${MINOR}.${NEW_PATCH}" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: Create and push tag
+        run: |
+          git tag "${{ steps.version.outputs.tag }}"
+          git push origin "${{ steps.version.outputs.tag }}"
+
+      - name: Update version in pyproject.toml
+        run: |
+          sed -i "s/^version = .*/version = \"${{ steps.version.outputs.version }}\"/" pyproject.toml
+
+      - name: Build package
+        run: |
+          pip install build
+          python -m build
+
+      - name: Create GitHub release
+        run: gh release create "${{ steps.version.outputs.tag }}" --generate-notes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

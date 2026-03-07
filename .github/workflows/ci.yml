@@ -18,6 +18,8 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: |
+          pip install "strawpot @ git+https://github.com/strawpot/strawpot.git@main#subdirectory=cli"
+          pip install -e ".[dev]"
       - name: Run tests
         run: pytest --cov=dial_memory --cov-report=term-missing -v

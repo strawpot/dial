@@ -1,6 +1,6 @@
 """Tests for dial_memory.scorer."""
 
-from dial_memory.scorer import score_and_filter, score_entry, tokenize
+from dial.scorer import score_and_filter, score_entry, tokenize
 
 
 def test_tokenize_basic():

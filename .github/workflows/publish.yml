@@ -56,9 +56,12 @@ jobs:
           git tag "${{ steps.version.outputs.tag }}"
           git push origin "${{ steps.version.outputs.tag }}"
 
-      - name: Update version in pyproject.toml
+      - name: Update version in pyproject.toml and MEMORY.md
         run: |
-          sed -i "s/^version = .*/version = \"${{ steps.version.outputs.version }}\"/" pyproject.toml
+          VERSION="${{ steps.version.outputs.version }}"
+          sed -i "s/^version = .*/version = \"${VERSION}\"/" pyproject.toml
+          sed -i "s/^  version: .*/  version: \"${VERSION}\"/" dial/MEMORY.md
+          sed -i "s/^    pip: .*/    pip: \"dial-memory>=${VERSION}\"/" dial/MEMORY.md
 
       - name: Build package
         run: |
@@ -72,3 +75,11 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Commit version updates
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml dial/MEMORY.md
+          git commit -m "Bump version to ${{ steps.version.outputs.version }} [skip ci]" || true
+          git push origin HEAD:main

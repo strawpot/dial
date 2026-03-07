@@ -260,3 +260,44 @@ def test_get_budget_trimming(tmp_path):
     )
     total = sum(len(c.content) for c in result.context_cards)
     assert total <= 50
+
+
+# -- EM rotation --------------------------------------------------------------
+
+
+def test_dump_rotates_em_when_exceeding_max(tmp_path):
+    p = DialMemoryProvider({
+        "storage_dir": str(tmp_path / "project"),
+        "global_storage_dir": str(tmp_path / "global"),
+        "em_max_events": 5,
+    })
+    for i in range(8):
+        p.dump(
+            session_id="s1", agent_id="a1", role="impl",
+            behavior_ref="text", task=f"task-{i}",
+            status="success", output=f"output-{i}",
+        )
+    em_file = tmp_path / "project" / "em" / "s1.jsonl"
+    events = read_jsonl(em_file)
+    assert len(events) == 5
+    assert events[0]["data"]["task"] == "task-3"
+    assert events[-1]["data"]["task"] == "task-7"
+
+
+# -- remember dedup cache ----------------------------------------------------
+
+
+def test_remember_cache_avoids_reread(tmp_path):
+    p = _make_provider(tmp_path)
+    # First call reads from file and caches
+    r1 = p.remember(session_id="s1", agent_id="a1", role="impl",
+                    content="Fact A", scope="project")
+    assert r1.status == "accepted"
+    # Second call with same content uses cache (no file re-read needed)
+    r2 = p.remember(session_id="s1", agent_id="a1", role="impl",
+                    content="Fact A", scope="project")
+    assert r2.status == "duplicate"
+    # Different content still works
+    r3 = p.remember(session_id="s1", agent_id="a1", role="impl",
+                    content="Fact B", scope="project")
+    assert r3.status == "accepted"

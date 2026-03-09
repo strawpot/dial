@@ -78,6 +78,24 @@ def role_knowledge_path(storage_dir: Path, role: str) -> Path:
     return storage_dir / "knowledge" / "roles" / role / "knowledge.jsonl"
 
 
+def em_dir(storage_dir: Path) -> Path:
+    """Path to the EM event directory."""
+    return storage_dir / "em"
+
+
+def read_em_dir(directory: Path, tail_count: int) -> list[dict]:
+    """Read the most recent *tail_count* events across all session EM files."""
+    if not directory.is_dir():
+        return []
+    all_events: list[dict] = []
+    for f in sorted(directory.iterdir()):
+        if f.suffix == ".jsonl" and f.is_file():
+            all_events.extend(read_jsonl(f))
+    # Sort by timestamp descending, take most recent
+    all_events.sort(key=lambda e: e.get("ts", ""), reverse=True)
+    return all_events[:tail_count]
+
+
 def count_lines(path: Path) -> int:
     """Count non-empty lines in a file. Returns 0 if file doesn't exist."""
     if not path.is_file():

@@ -301,3 +301,128 @@ def test_remember_cache_avoids_reread(tmp_path):
     r3 = p.remember(session_id="s1", agent_id="a1", role="impl",
                     content="Fact B", scope="project")
     assert r3.status == "accepted"
+
+
+# -- EM processing (consolidation, prioritization, relevance) ----------------
+
+
+def test_em_consolidates_duplicate_tasks(tmp_path):
+    """Repeated tasks are consolidated into one entry with a count."""
+    p = _make_provider(tmp_path)
+    for _ in range(5):
+        p.dump(
+            session_id="s1", agent_id="a1", role="impl",
+            behavior_ref="text", task="Run tests",
+            status="success", output="all passed",
+        )
+    result = p.get(
+        session_id="s1", agent_id="a1", role="impl",
+        behavior_ref="text", task="Run tests",
+    )
+    em_cards = [c for c in result.context_cards if c.kind == MemoryKind.EM]
+    assert len(em_cards) == 1
+    # Should be consolidated into one line with count
+    assert "x5" in em_cards[0].content
+
+
+def test_em_failures_prioritised_over_successes(tmp_path):
+    """Events with failures sort above pure successes."""
+    p = _make_provider(tmp_path)
+    # Dump a success first, then a failure on a different task
+    p.dump(
+        session_id="s1", agent_id="a1", role="impl",
+        behavior_ref="text", task="Unrelated success",
+        status="success", output="done",
+    )
+    p.dump(
+        session_id="s1", agent_id="a1", role="impl",
+        behavior_ref="text", task="Broken build",
+        status="error", output="compile error",
+    )
+    # Query with a task unrelated to both so relevance is neutral
+    result = p.get(
+        session_id="s1", agent_id="a1", role="impl",
+        behavior_ref="text", task="Something completely different xyz",
+    )
+    em_cards = [c for c in result.context_cards if c.kind == MemoryKind.EM]
+    assert len(em_cards) == 1
+    lines = em_cards[0].content.strip().split("\n")
+    # The failure should appear first
+    assert "Broken build" in lines[0]
+
+
+def test_em_relevance_scoring(tmp_path):
+    """Events matching the current task rank higher than unrelated ones."""
+    p = _make_provider(tmp_path)
+    # Dump several unrelated events first (older = lower recency)
+    for i in range(5):
+        p.dump(
+            session_id="s1", agent_id="a1", role="impl",
+            behavior_ref="text", task=f"Unrelated task {i}",
+            status="success", output="done",
+        )
+    # Dump one relevant event last
+    p.dump(
+        session_id="s1", agent_id="a1", role="impl",
+        behavior_ref="text", task="Fix payment integration",
+        status="success", output="fixed stripe webhook",
+    )
+    result = p.get(
+        session_id="s1", agent_id="a1", role="impl",
+        behavior_ref="text", task="Debug payment integration issue",
+    )
+    em_cards = [c for c in result.context_cards if c.kind == MemoryKind.EM]
+    assert len(em_cards) == 1
+    lines = em_cards[0].content.strip().split("\n")
+    # The payment-related event should be first despite others existing
+    assert "payment" in lines[0].lower()
+
+
+def test_em_consolidation_tracks_failure_count(tmp_path):
+    """Consolidated entry shows how many runs failed."""
+    p = _make_provider(tmp_path)
+    p.dump(
+        session_id="s1", agent_id="a1", role="impl",
+        behavior_ref="text", task="Deploy",
+        status="success", output="ok",
+    )
+    p.dump(
+        session_id="s1", agent_id="a1", role="impl",
+        behavior_ref="text", task="Deploy",
+        status="error", output="timeout",
+    )
+    p.dump(
+        session_id="s1", agent_id="a1", role="impl",
+        behavior_ref="text", task="Deploy",
+        status="error", output="timeout again",
+    )
+    result = p.get(
+        session_id="s1", agent_id="a1", role="impl",
+        behavior_ref="text", task="Deploy",
+    )
+    em_cards = [c for c in result.context_cards if c.kind == MemoryKind.EM]
+    content = em_cards[0].content
+    assert "x3" in content
+    assert "2 failed" in content
+
+
+def test_em_processing_respects_tail_count(tmp_path):
+    """After consolidation, only tail_count entries are returned."""
+    p = DialMemoryProvider({
+        "storage_dir": str(tmp_path / "project"),
+        "global_storage_dir": str(tmp_path / "global"),
+        "em_tail_count": 2,
+    })
+    for i in range(5):
+        p.dump(
+            session_id="s1", agent_id="a1", role="impl",
+            behavior_ref="text", task=f"Distinct task {i}",
+            status="success", output="done",
+        )
+    result = p.get(
+        session_id="s1", agent_id="a1", role="impl",
+        behavior_ref="text", task="something",
+    )
+    em_cards = [c for c in result.context_cards if c.kind == MemoryKind.EM]
+    lines = em_cards[0].content.strip().split("\n")
+    assert len(lines) <= 2

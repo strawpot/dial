@@ -68,7 +68,7 @@ strawpot delegation flow
   │   │
   │   ├─ Knowledge (SM) → global + project + role facts (always included)
   │   ├─ Knowledge (RM) → keyword-matched entries (when task matches)
-  │   └─ EM             → recent events from this session (last N)
+  │   └─ EM             → recent events, consolidated + ranked by relevance
   │
   │   Returns: GetResult(context_cards, control_signals)
   │
@@ -289,9 +289,26 @@ Fully automatic — no agent cooperation required.
 
 **Write rule:** Always append, no gate.
 
-**Read rule:** On `get`, return the last `em_tail_count` events from
-the current session as a single EM context card. Provides recency
-context so agents know what has already happened.
+**Read rule:** On `get`, raw events are processed through a three-stage
+pipeline before being returned as a single EM context card:
+
+1. **Consolidation** — Events are grouped by task text. Repeated
+   tasks collapse into a single entry with occurrence count and
+   failure count (e.g., `[x5, 2 failed]`). The latest event in each
+   group is kept.
+
+2. **Status-aware prioritisation** — Groups containing failures
+   (`error`, `failure`, `failed`) receive a score boost so they
+   surface above routine successes.
+
+3. **Task-relevance scoring** — Each consolidated entry is scored
+   against the current task using Jaccard token overlap (reusing the
+   same `tokenize` function as RM scoring). The final score blends
+   relevance (40%), status boost (30%), and recency (30%).
+
+After scoring, the top `em_tail_count` consolidated entries are
+returned, best-first. This transforms EM from a raw log tail into
+contextual, deduplicated, failure-aware history.
 
 ### Knowledge Store (SM + RM unified)
 
@@ -368,10 +385,11 @@ def get(*, session_id, agent_id, role, behavior_ref, task, budget, parent_agent_
         cards.append(ContextCard(kind=RM, content=format_entries(rm_matches)))
         sources.append("rm")
 
-    # 4. EM — recent session events
-    em_events = read_em_tail(session_id, count=em_tail_count)
+    # 4. EM — recent session events (consolidated + ranked)
+    em_events = collect_em(session_id)
     if em_events:
-        cards.append(ContextCard(kind=EM, content=format_em(em_events)))
+        processed = process_em(em_events, task, em_tail_count)
+        cards.append(ContextCard(kind=EM, content=format_em(processed)))
         sources.append("em")
 
     # 5. Budget trimming (if budget is set)

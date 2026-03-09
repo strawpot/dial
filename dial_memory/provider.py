@@ -97,10 +97,11 @@ class DialMemoryProvider:
         # 4. EM — recent events (scope: session, project, or global)
         em_events = self._collect_em(session_id)
         if em_events:
+            processed = _process_em(em_events, task, self._em_tail_count)
             cards.append(
                 ContextCard(
                     kind=MemoryKind.EM,
-                    content=_format_em(em_events),
+                    content=_format_em(processed),
                     source="em",
                 )
             )
@@ -233,6 +234,73 @@ class DialMemoryProvider:
 # -- Formatting helpers -------------------------------------------------------
 
 
+_FAILURE_STATUSES = frozenset({"error", "failure", "failed"})
+
+
+def _process_em(
+    events: list[dict], task: str, tail_count: int
+) -> list[dict]:
+    """Consolidate, prioritize, and rank EM events.
+
+    1. Consolidate — group by task text, keep latest per group with count.
+    2. Prioritise — failures get a score boost.
+    3. Relevance — token overlap between current task and event task.
+
+    Returns up to *tail_count* consolidated entries, best-first.
+    """
+    if not events:
+        return []
+
+    # -- 1. Consolidate by task text ------------------------------------------
+    from collections import OrderedDict
+
+    groups: OrderedDict[str, list[dict]] = OrderedDict()
+    for ev in events:
+        key = ev.get("data", {}).get("task", "")
+        groups.setdefault(key, []).append(ev)
+
+    consolidated: list[dict] = []
+    for _task_key, group in groups.items():
+        group.sort(key=lambda e: e.get("ts", ""), reverse=True)
+        latest = dict(group[0])  # shallow copy
+        latest["_count"] = len(group)
+        statuses = [e.get("data", {}).get("status", "") for e in group]
+        latest["_failure_count"] = sum(
+            1 for s in statuses if s in _FAILURE_STATUSES
+        )
+        consolidated.append(latest)
+
+    # -- 2 + 3. Score: relevance + status boost + recency ---------------------
+    from .scorer import tokenize
+
+    task_tokens = tokenize(task)
+    n = len(consolidated)
+
+    scored: list[tuple[float, dict]] = []
+    for idx, entry in enumerate(consolidated):
+        entry_task = entry.get("data", {}).get("task", "")
+        entry_tokens = tokenize(entry_task)
+
+        # Relevance: Jaccard-style overlap
+        if task_tokens and entry_tokens:
+            union = task_tokens | entry_tokens
+            relevance = len(task_tokens & entry_tokens) / len(union)
+        else:
+            relevance = 0.0
+
+        # Status boost: any failure in the group
+        status_boost = 1.0 if entry.get("_failure_count", 0) > 0 else 0.0
+
+        # Recency: newest consolidated entry = 1.0, oldest = 0.0
+        recency = 1.0 - (idx / n) if n > 1 else 1.0
+
+        score = 0.4 * relevance + 0.3 * status_boost + 0.3 * recency
+        scored.append((score, entry))
+
+    scored.sort(key=lambda t: t[0], reverse=True)
+    return [entry for _, entry in scored[:tail_count]]
+
+
 def _format_knowledge(entries: list[dict]) -> str:
     """Format knowledge entries as readable text for context cards."""
     lines = []
@@ -250,9 +318,17 @@ def _format_em(events: list[dict]) -> str:
         status = data.get("status", "")
         task = data.get("task", "")
         summary = data.get("summary", "")
+        count = ev.get("_count", 1)
+        failure_count = ev.get("_failure_count", 0)
+
         line = f"[{role}] {task}"
         if status:
             line += f" ({status})"
+        if count > 1:
+            line += f" [x{count}"
+            if failure_count:
+                line += f", {failure_count} failed"
+            line += "]"
         if summary and summary != task:
             line += f": {summary[:200]}"
         lines.append(line)

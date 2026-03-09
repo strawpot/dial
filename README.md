@@ -14,7 +14,7 @@ memory = "dial"
 
 ## How It Works
 
-- **EM** — Append-only event log per session. Fully automatic, no agent cooperation needed.
+- **EM** — Append-only event log per session. Fully automatic. Events are consolidated (deduped by task), ranked by relevance to the current task, and failures are prioritised.
 - **Knowledge (SM)** — Facts and conventions, always included. Scoped to global, project, or role.
 - **Knowledge (RM)** — Domain-specific entries, included only when the task keywords match.
 

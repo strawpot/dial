@@ -321,7 +321,11 @@ def _format_em(events: list[dict]) -> str:
         count = ev.get("_count", 1)
         failure_count = ev.get("_failure_count", 0)
 
-        line = f"[{role}] {task}"
+        ts = ev.get("ts", "")
+        if ts:
+            # Trim to minute precision: "2026-03-10T14:30"
+            ts = ts[:16]
+        line = f"[{ts}] [{role}] {task}" if ts else f"[{role}] {task}"
         if status:
             line += f" ({status})"
         if count > 1:

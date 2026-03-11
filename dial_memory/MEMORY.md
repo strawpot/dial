@@ -15,7 +15,7 @@ metadata:
         description: Global storage directory
       em_tail_count:
         type: int
-        default: 20
+        default: 5
         description: Number of recent EM events to include in get
       em_max_events:
         type: int

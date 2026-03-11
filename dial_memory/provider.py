@@ -44,7 +44,7 @@ class DialMemoryProvider:
         self._global_dir = expand_path(
             cfg.get("global_storage_dir", "~/.strawpot/memory/dial-data")
         )
-        self._em_tail_count: int = int(cfg.get("em_tail_count", 20))
+        self._em_tail_count: int = int(cfg.get("em_tail_count", 5))
         self._em_max_events: int = int(cfg.get("em_max_events", 10000))
         self._em_scope: str = cfg.get("em_scope", "project")
         self._rm_min_score: float = float(cfg.get("rm_min_score", 0.3))

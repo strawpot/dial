@@ -28,7 +28,11 @@ metadata:
       rm_min_score:
         type: float
         default: 0.3
-        description: Minimum relevance score for RM entries
+        description: "Minimum BM25 relevance score for RM entries, relative to the top result in the batch (0.0 = include all, 1.0 = top result only)"
+      simhash_dedup_threshold:
+        type: int
+        default: 8
+        description: "SimHash Hamming distance threshold for near-duplicate detection in remember() (out of 64 bits; lower = stricter dedup)"
 ---
 
 # Dial

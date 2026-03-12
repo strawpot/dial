@@ -686,7 +686,7 @@ changes.
 
 ### Step 2: BM25 + SimHash Scoring
 
-**Status: Planned — no model, no dependencies**
+**Status: Implemented — PR #21 (pending merge)**
 
 The largest quality gap is relevance scoring. Jaccard overlap treats all
 matching tokens equally and ignores how rare or common a term is across

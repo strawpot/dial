@@ -51,6 +51,7 @@ class DialMemoryProvider:
         self._em_max_events: int = int(cfg.get("em_max_events", 10000))
         self._em_scope: str = cfg.get("em_scope", "project")
         self._rm_min_score: float = float(cfg.get("rm_min_score", 0.3))
+        self._simhash_dedup_threshold: int = int(cfg.get("simhash_dedup_threshold", _SIMHASH_DEDUP_THRESHOLD))
         self._known_contents: dict[str, set[str]] = {}   # path -> content set
         self._known_hashes: dict[str, list[int]] = {}    # path -> simhash list
 
@@ -189,7 +190,7 @@ class DialMemoryProvider:
         # Dedup: SimHash near-duplicate check (Hamming distance < threshold)
         new_hash = simhash(content)
         for existing_hash in self._known_hashes[cache_key]:
-            if hamming(new_hash, existing_hash) < _SIMHASH_DEDUP_THRESHOLD:
+            if hamming(new_hash, existing_hash) < self._simhash_dedup_threshold:
                 return RememberResult(status="duplicate", entry_id="")
 
         entry_id = _make_id("k")

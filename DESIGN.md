@@ -709,6 +709,11 @@ is real but rare in practice for technical workloads.
 - Corpus = all RM entries in the knowledge store
 - Score each entry's keywords against recall query
 - Same IDF weighting benefits apply
+- Scores normalised to [0, 1] relative to the top result in the batch, so
+  `rm_min_score` is now a relative threshold (top result = 1.0 always).
+  Previously it was an absolute ratio (keyword overlap fraction). Behaviorally
+  this means `rm_min_score=0.3` now means "include results scoring ≥ 30% of
+  the best match" rather than "at least 30% of keywords must overlap".
 
 **SimHash for deduplication** (replaces exact match in `remember`):
 - 64-bit fingerprint via FNV-1a token hashing + bit-accumulation

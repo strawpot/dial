@@ -18,7 +18,7 @@ from strawpot_memory.memory_protocol import (
     RememberResult,
 )
 
-from .scorer import score_and_filter, score_entry
+from .scorer import BM25, hamming, score_and_filter, simhash, tokenize
 from .storage import (
     append_jsonl,
     count_lines,
@@ -51,7 +51,8 @@ class DialMemoryProvider:
         self._em_max_events: int = int(cfg.get("em_max_events", 10000))
         self._em_scope: str = cfg.get("em_scope", "project")
         self._rm_min_score: float = float(cfg.get("rm_min_score", 0.3))
-        self._known_contents: dict[str, set[str]] = {}  # path -> content set
+        self._known_contents: dict[str, set[str]] = {}   # path -> content set
+        self._known_hashes: dict[str, list[int]] = {}    # path -> simhash list
 
     # -- get ------------------------------------------------------------------
 
@@ -86,12 +87,12 @@ class DialMemoryProvider:
 
         # 3. RM — entries with keywords (conditionally included)
         rm_entries = [e for e in all_entries if e.get("keywords")]
-        rm_matches = score_and_filter(rm_entries, task, self._rm_min_score)
-        if rm_matches:
+        rm_scored = score_and_filter(rm_entries, task, self._rm_min_score)
+        if rm_scored:
             cards.append(
                 ContextCard(
                     kind=MemoryKind.RM,
-                    content=_format_knowledge(rm_matches),
+                    content=_format_knowledge([e for _, e in rm_scored]),
                     source="knowledge",
                 )
             )
@@ -181,10 +182,15 @@ class DialMemoryProvider:
             self._known_contents[cache_key] = {
                 e.get("content", "") for e in existing
             }
+            self._known_hashes[cache_key] = [
+                simhash(e.get("content", "")) for e in existing
+            ]
 
-        # Dedup: exact content match
-        if content in self._known_contents[cache_key]:
-            return RememberResult(status="duplicate", entry_id="")
+        # Dedup: SimHash near-duplicate check (Hamming distance < threshold)
+        new_hash = simhash(content)
+        for existing_hash in self._known_hashes[cache_key]:
+            if hamming(new_hash, existing_hash) < _SIMHASH_DEDUP_THRESHOLD:
+                return RememberResult(status="duplicate", entry_id="")
 
         entry_id = _make_id("k")
         entry = {
@@ -196,6 +202,7 @@ class DialMemoryProvider:
         }
         append_jsonl(store_path, entry)
         self._known_contents[cache_key].add(content)
+        self._known_hashes[cache_key].append(new_hash)
         return RememberResult(status="accepted", entry_id=entry_id)
 
     # -- recall ---------------------------------------------------------------
@@ -246,14 +253,14 @@ class DialMemoryProvider:
                         score=1.0,
                     )
                 )
-        for e in scored:
+        for s, e in scored:
             result_entries.append(
                 RecallEntry(
                     entry_id=e.get("entry_id", ""),
                     content=e.get("content", ""),
                     keywords=e.get("keywords", []),
                     scope=e.get("_scope", "project"),
-                    score=score_entry(e, query),
+                    score=s,
                 )
             )
 
@@ -378,6 +385,10 @@ def _extract_summary(output: str, max_len: int = 500) -> str:
 
 _FAILURE_STATUSES = frozenset({"error", "failure", "failed"})
 
+# SimHash dedup: entries with Hamming distance below this threshold are
+# treated as near-duplicates (out of 64 bits; 8 = ~12.5% bit difference).
+_SIMHASH_DEDUP_THRESHOLD = 8
+
 
 def _process_em(
     events: list[dict], task: str, tail_count: int
@@ -413,22 +424,21 @@ def _process_em(
         consolidated.append(latest)
 
     # -- 2 + 3. Score: relevance + status boost + recency ---------------------
-    from .scorer import tokenize
-
-    task_tokens = tokenize(task)
     n = len(consolidated)
 
-    scored: list[tuple[float, dict]] = []
-    for idx, entry in enumerate(consolidated):
-        entry_task = entry.get("data", {}).get("task", "")
-        entry_tokens = tokenize(entry_task)
+    # Build BM25 corpus from all event task texts
+    em_corpora = [tokenize(e.get("data", {}).get("task", "")) for e in consolidated]
+    bm25 = BM25(em_corpora)
+    query_tokens = tokenize(task)
 
-        # Relevance: Jaccard-style overlap
-        if task_tokens and entry_tokens:
-            union = task_tokens | entry_tokens
-            relevance = len(task_tokens & entry_tokens) / len(union)
-        else:
-            relevance = 0.0
+    # Compute raw BM25 scores for normalisation
+    raw_scores = [bm25.score(query_tokens, doc) for doc in em_corpora]
+    max_raw = max(raw_scores) if raw_scores else 1.0
+
+    scored: list[tuple[float, dict]] = []
+    for idx, (entry, raw) in enumerate(zip(consolidated, raw_scores)):
+        # Relevance: BM25 normalised to [0, 1]
+        relevance = (raw / max_raw) if max_raw > 0 else 0.0
 
         # Status boost: any failure in the group
         status_boost = 1.0 if entry.get("_failure_count", 0) > 0 else 0.0

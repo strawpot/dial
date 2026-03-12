@@ -626,7 +626,7 @@ protocol types.
 
 ### Step 1: Agent-Authored Summary Extraction
 
-**Status: Planned — no LLM, no dependencies**
+**Status: Implemented — shipped in v0.1.12 (dial-memory), strawpot PR #239, skills PR #13**
 
 Replace `output[:500]` in `dump()` with a 3-layer `_extract_summary()` that
 finds the most meaningful text from the agent's output.
@@ -684,24 +684,52 @@ changes.
 
 ---
 
-### Step 2: Embeddings for Semantic Scoring
+### Step 2: BM25 + SimHash Scoring
 
-**Status: Deferred — optional, model-agnostic**
+**Status: Planned — no model, no dependencies**
 
-The largest quality gap is relevance scoring. Jaccard overlap on task text
-misses synonyms, paraphrases, and semantic similarity entirely.
+The largest quality gap is relevance scoring. Jaccard overlap treats all
+matching tokens equally and ignores how rare or common a term is across
+the corpus. BM25 fixes this without any model or external dependency.
 
-Embeddings solve this without full LLM latency:
+**Why BM25 over embeddings:**
+Embeddings require a running model (ollama, OpenAI API, etc.). For a
+code-focused agent, most task descriptions share vocabulary — "fix scorer",
+"update provider", "add tests". BM25 captures ~85% of the improvement
+embeddings would give at zero cost. The synonym gap ("refactor" ↔ "rewrote")
+is real but rare in practice for technical workloads.
 
-- **EM scoring**: embed current task + each event's task text → cosine similarity replaces Jaccard
-- **RM scoring**: embed query + each entry's keywords/content → replaces keyword overlap
-- **Knowledge deduplication**: embed new entry → compare against stored → catch near-duplicates
+**BM25 for EM scoring** (replaces Jaccard in `_select_em_events`):
+- Corpus = all consolidated event task texts
+- Score each event's task text against current task using BM25
+- Rare/specific terms ("jaccard", "simhash") outweigh common ones ("fix", "add")
+- Length-normalised: short task strings aren't penalised vs long ones
 
-Design:
-- New optional config param: `em_embedder` (e.g. `"openai"`, `"ollama/nomic-embed-text"`)
-- Embeddings generated at `dump()` time, stored alongside the event
-- Model-agnostic via a thin adapter layer
-- Default (no embedder): falls back to current Jaccard scoring — zero-dependency preserved
+**BM25 for RM scoring** (replaces keyword overlap in `score_and_filter`):
+- Corpus = all RM entries in the knowledge store
+- Score each entry's keywords against recall query
+- Same IDF weighting benefits apply
+
+**SimHash for deduplication** (replaces exact match in `remember`):
+- 64-bit fingerprint via FNV-1a token hashing + bit-accumulation
+- Hamming distance < threshold (default: 8 bits) → near-duplicate
+- Catches "auth uses JWT" ≈ "JWT is used by auth" — different wording, same fact
+
+**Implementation:** All changes confined to `scorer.py` and `provider.py`.
+Zero new dependencies — pure Python stdlib only.
+
+| What | Before | After |
+|------|--------|-------|
+| EM relevance | Jaccard token overlap | BM25 with EM corpus IDF |
+| RM relevance | Keyword overlap count | BM25 with knowledge store IDF |
+| Knowledge dedup | Exact content match | SimHash Hamming distance |
+
+#### Embeddings (future upgrade path)
+
+Embeddings remain the only way to close the synonym gap. If that proves
+necessary in practice, a future step can add an optional `em_embedder`
+config param (e.g. `"ollama/nomic-embed-text"`, `"openai"`) that replaces
+BM25 scoring when configured. BM25 stays as the zero-dependency default.
 
 ---
 

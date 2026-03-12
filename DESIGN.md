@@ -612,6 +612,101 @@ protocol types.
 
 ---
 
+## Memory Quality Roadmap
+
+### Current State
+
+| Area | Approach | Limitation |
+|------|----------|------------|
+| EM summary extraction | First 500 chars of output verbatim | Often captures markdown boilerplate (headers, tables) not meaningful content |
+| EM relevance scoring | Jaccard token overlap on task text | Misses synonyms, paraphrases, semantic similarity |
+| Knowledge deduplication | Exact content match | Near-duplicate entries with different wording accumulate |
+
+---
+
+### Step 1: MEMORY_NOTE Protocol
+
+**Status: Planned — no LLM, no dependencies**
+
+Add a `<!-- MEMORY_NOTE: ... -->` marker that agents can embed anywhere
+in their output. `dump()` extracts it before falling back to heuristics.
+
+```
+_extract_summary(output) priority order:
+  1. <!-- MEMORY_NOTE: <text> -->   — explicit, agent-authored (best quality)
+  2. Smart heuristic               — skip headers, tables, code fences; first prose paragraph
+  3. Strip markdown fallback        — strip markdown syntax, take first 300 chars
+```
+
+The agent writing the output has more context than any post-processing
+system. An agent that knows what it accomplished authors a better
+summary than heuristic extraction or LLM post-processing.
+
+Agents learn the convention via an addition to the denden skill's SKILL.md:
+
+```
+At the end of your response, add a one-line memory note:
+<!-- MEMORY_NOTE: <what you accomplished, one sentence, no markdown> -->
+```
+
+No protocol changes required. Only affects `dump()` and the skill docs.
+
+---
+
+### Step 2: Embeddings for Semantic Scoring
+
+**Status: Deferred — optional, model-agnostic**
+
+The largest quality gap is relevance scoring. Jaccard overlap on task text
+misses synonyms, paraphrases, and semantic similarity entirely.
+
+Embeddings solve this without full LLM latency:
+
+- **EM scoring**: embed current task + each event's task text → cosine similarity replaces Jaccard
+- **RM scoring**: embed query + each entry's keywords/content → replaces keyword overlap
+- **Knowledge deduplication**: embed new entry → compare against stored → catch near-duplicates
+
+Design:
+- New optional config param: `em_embedder` (e.g. `"openai"`, `"ollama/nomic-embed-text"`)
+- Embeddings generated at `dump()` time, stored alongside the event
+- Model-agnostic via a thin adapter layer
+- Default (no embedder): falls back to current Jaccard scoring — zero-dependency preserved
+
+---
+
+### Step 3: Offline LLM Distillation
+
+**Status: Deferred**
+
+Periodically condense accumulated EM events into SM knowledge entries.
+Identifies recurring patterns, lessons learned, and persistent facts
+across sessions. Runs async / on-demand — never on the `dump()` or
+`get()` hot path.
+
+This is where LLM adds genuine value. Analyzing patterns across many
+events requires language understanding that Jaccard overlap cannot
+provide. Unlike summary extraction (where the writing agent has more
+context), distillation reasons over historical data no single agent
+has seen in full.
+
+Possible trigger: `em_max_events` rotation threshold, or explicit
+`denden distill` command.
+
+---
+
+### Decision: No LLM on the Hot Path
+
+LLM post-processing of `dump()` output is explicitly rejected:
+
+- The writing agent has more context than any post-processor — it knows
+  *why* it did what it did, not just what the output text says
+- Adds latency and external dependency to every agent completion
+- `MEMORY_NOTE` achieves better quality at zero cost
+
+LLM for offline distillation (Step 3) is deferred, not rejected.
+
+---
+
 ## Future Extensions
 
 Deferred from v1. The architecture accommodates these without
@@ -622,15 +717,6 @@ and write. Entries go to a `proposals/` directory instead of directly
 to `knowledge.jsonl`. The `RememberResult` contract already supports
 `status="queued"` for this. Useful for team workflows where untrusted
 agent knowledge should be reviewed before becoming permanent.
-
-**LLM enhancement.** Add an optional LLM layer (`llm.py`) for:
-- Implicit knowledge extraction from `dump()` output
-- Semantic deduplication on `remember()` (catch near-duplicates)
-- Auto keyword extraction when agents don't provide keywords
-
-The `remember` RPC alone is the high-value path — the calling agent
-is already an LLM with full context. LLM post-processing becomes
-valuable at scale but is premature for v1.
 
 ---
 

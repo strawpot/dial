@@ -624,16 +624,16 @@ protocol types.
 
 ---
 
-### Step 1: MEMORY_NOTE Protocol
+### Step 1: Agent-Authored Summary Extraction
 
 **Status: Planned — no LLM, no dependencies**
 
-Add a `<!-- MEMORY_NOTE: ... -->` marker that agents can embed anywhere
-in their output. `dump()` extracts it before falling back to heuristics.
+Replace `output[:500]` in `dump()` with a 3-layer `_extract_summary()` that
+finds the most meaningful text from the agent's output.
 
 ```
 _extract_summary(output) priority order:
-  1. <!-- MEMORY_NOTE: <text> -->   — explicit, agent-authored (best quality)
+  1. ## Session Recap section      — explicit, agent-authored (best quality)
   2. Smart heuristic               — skip headers, tables, code fences; first prose paragraph
   3. Strip markdown fallback        — strip markdown syntax, take first 300 chars
 ```
@@ -642,14 +642,45 @@ The agent writing the output has more context than any post-processing
 system. An agent that knows what it accomplished authors a better
 summary than heuristic extraction or LLM post-processing.
 
-Agents learn the convention via an addition to the denden skill's SKILL.md:
+#### The `strawpot-session-recap` Skill
 
-```
-At the end of your response, add a one-line memory note:
-<!-- MEMORY_NOTE: <what you accomplished, one sentence, no markdown> -->
-```
+The `## Session Recap` convention is taught to agents via a dedicated
+**`strawpot-session-recap`** skill — an official built-in skill, injected
+by strawpot alongside denden for every agent automatically.
 
-No protocol changes required. Only affects `dump()` and the skill docs.
+**Why a separate skill, not denden:** Denden is a communication protocol
+skill (ask, delegate, remember, recall). Output formatting behavior is
+out of scope. A dedicated skill keeps responsibilities clean.
+
+**Auto-injection:** strawpot hardcodes `strawpot-session-recap` injection
+in `delegation.py` alongside `_ensure_denden_staged()`, using the same
+`~/.strawpot/skills/strawpot-session-recap/` lookup. No role configuration
+needed — every agent gets it.
+
+**Skill format:** Minimal — just `SKILL.md` in the skills repo
+(`skills/skills/strawpot-session-recap/`). No scripts or binaries needed.
+
+**Migration from GUI injection:** The strawpot GUI previously injected
+the recap instruction inline in `conversations.py` →
+`_build_conversation_context()` (added 2026-03-12). Once the skill is
+auto-injected by strawpot core, that GUI injection is removed. The GUI's
+`_extract_recap()` in `db.py` remains — it still reads the
+`## Session Recap` block from agent output; only the instruction delivery
+changes.
+
+**Two consumers of one convention:**
+
+- **strawpot GUI** (`db.py`) extracts it → `sessions.summary` → next conversation turn context
+- **dial** (`provider.py`) extracts it → EM event summary → cross-session memory retrieval
+
+#### Cross-Repo Changes for Step 1
+
+| Repo | Change |
+|------|--------|
+| **skills** | Create `skills/strawpot-session-recap/SKILL.md` with recap format instruction |
+| **strawpot** | Add `_ensure_session_recap_staged()` in `delegation.py` alongside `_ensure_denden_staged()` |
+| **strawpot GUI** | Remove recap instruction injection from `conversations.py` `_build_conversation_context()` |
+| **dial** | Implement `_extract_summary()`, replace `output[:500]` in `dump()` |
 
 ---
 
@@ -701,7 +732,7 @@ LLM post-processing of `dump()` output is explicitly rejected:
 - The writing agent has more context than any post-processor — it knows
   *why* it did what it did, not just what the output text says
 - Adds latency and external dependency to every agent completion
-- `MEMORY_NOTE` achieves better quality at zero cost
+- `## Session Recap` extraction achieves better quality at zero cost
 
 LLM for offline distillation (Step 3) is deferred, not rejected.
 

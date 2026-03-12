@@ -724,16 +724,33 @@ Zero new dependencies — pure Python stdlib only.
 | RM relevance | Keyword overlap count | BM25 with knowledge store IDF |
 | Knowledge dedup | Exact content match | SimHash Hamming distance |
 
-#### Embeddings (future upgrade path)
+---
 
-Embeddings remain the only way to close the synonym gap. If that proves
-necessary in practice, a future step can add an optional `em_embedder`
-config param (e.g. `"ollama/nomic-embed-text"`, `"openai"`) that replaces
-BM25 scoring when configured. BM25 stays as the zero-dependency default.
+### Step 3: Embeddings for Semantic Scoring
+
+**Status: Deferred — optional, model-agnostic**
+
+BM25 closes most of the quality gap, but cannot match synonyms or
+paraphrases ("refactor auth" ↔ "rewrote login"). Embeddings are the
+only way to close that remaining gap.
+
+Design:
+- New optional config param: `em_embedder` (e.g. `"openai"`, `"ollama/nomic-embed-text"`)
+- Embeddings generated at `dump()` time, stored alongside the event
+- Model-agnostic via a thin adapter layer
+- Default (no embedder configured): falls back to current BM25 scoring — zero-dependency preserved
+
+| What | BM25 (default) | Embeddings (optional) |
+|------|---------------|----------------------|
+| EM relevance | BM25 corpus IDF | Cosine similarity |
+| RM relevance | BM25 keyword IDF | Cosine similarity |
+| Knowledge dedup | SimHash Hamming | Embedding distance |
+| Catches synonyms | No | Yes |
+| External dependency | None | Model required |
 
 ---
 
-### Step 3: Offline LLM Distillation
+### Step 4: Offline LLM Distillation
 
 **Status: Deferred**
 
@@ -743,10 +760,9 @@ across sessions. Runs async / on-demand — never on the `dump()` or
 `get()` hot path.
 
 This is where LLM adds genuine value. Analyzing patterns across many
-events requires language understanding that Jaccard overlap cannot
-provide. Unlike summary extraction (where the writing agent has more
-context), distillation reasons over historical data no single agent
-has seen in full.
+events requires language understanding that BM25 cannot provide.
+Unlike summary extraction (where the writing agent has more context),
+distillation reasons over historical data no single agent has seen in full.
 
 Possible trigger: `em_max_events` rotation threshold, or explicit
 `denden distill` command.

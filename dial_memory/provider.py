@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -146,7 +147,7 @@ class DialMemoryProvider:
             "data": {
                 "task": task,
                 "status": status,
-                "summary": output[:500] if output else "",
+                "summary": _extract_summary(output) if output else "",
             },
         }
         path = em_path(self._storage_dir, session_id)
@@ -310,6 +311,66 @@ class DialMemoryProvider:
             return role_knowledge_path(self._storage_dir, role)
         else:  # "project" (default)
             return knowledge_path(self._storage_dir)
+
+
+# -- Summary extraction -------------------------------------------------------
+
+_RECAP_RE = re.compile(r"##\s+Session Recap\s*\n(.*?)(?=\n##\s|\Z)", re.IGNORECASE | re.DOTALL)
+_FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
+_MD_STRIP_RE = re.compile(r"[#*_`\[\]()>|~]|-{2,}|={2,}")
+
+
+def _extract_summary(output: str, max_len: int = 500) -> str:
+    """Extract a meaningful summary from agent output.
+
+    Priority order:
+      1. ## Session Recap section — explicit, agent-authored
+      2. Smart heuristic — first prose paragraph, skipping headers/tables/fences
+      3. Strip-markdown fallback — strip syntax, take first max_len chars
+    """
+    if not output:
+        return ""
+
+    # Layer 1: ## Session Recap section
+    m = _RECAP_RE.search(output)
+    if m:
+        recap = m.group(1).strip()
+        if recap:
+            return recap[:max_len]
+
+    # Layer 2: smart heuristic — find first prose paragraph
+    in_fence = False
+    prose_lines: list[str] = []
+    for line in output.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        if not stripped:
+            if prose_lines:
+                break  # end of first prose paragraph
+            continue
+        # Skip headings, horizontal rules, table rows
+        if stripped.startswith("#"):
+            continue
+        if re.match(r"^[-=]{3,}$", stripped):
+            continue
+        if stripped.startswith("|") and stripped.endswith("|"):
+            continue
+        prose_lines.append(stripped)
+
+    if prose_lines:
+        result = " ".join(prose_lines)
+        if result:
+            return result[:max_len]
+
+    # Layer 3: strip markdown, take first max_len chars
+    stripped = _FENCE_RE.sub(" ", output)
+    stripped = _MD_STRIP_RE.sub("", stripped)
+    stripped = re.sub(r"\s+", " ", stripped).strip()
+    return stripped[:max_len]
 
 
 # -- Formatting helpers -------------------------------------------------------

@@ -2,7 +2,7 @@
 
 import json
 
-from strawpot_memory.memory_protocol import MemoryKind, MemoryProvider, RememberResult
+from strawpot_memory.memory_protocol import MemoryKind, MemoryProvider, RecallEntry, RecallResult, RememberResult
 
 from dial_memory.provider import DialMemoryProvider
 from dial_memory.storage import knowledge_path, read_jsonl, role_knowledge_path
@@ -83,6 +83,116 @@ def test_remember_with_keywords(tmp_path):
     )
     entries = read_jsonl(knowledge_path(tmp_path / "project"))
     assert entries[0]["keywords"] == ["stripe", "payment"]
+
+
+# -- recall -------------------------------------------------------------------
+
+
+def test_recall_empty_store(tmp_path):
+    p = _make_provider(tmp_path)
+    r = p.recall(
+        session_id="s1", agent_id="a1", role="impl",
+        query="anything",
+    )
+    assert isinstance(r, RecallResult)
+    assert r.entries == []
+
+
+def test_recall_matches_keyword_entries(tmp_path):
+    p = _make_provider(tmp_path)
+    p.remember(
+        session_id="s1", agent_id="a1", role="impl",
+        content="Stripe needs API keys",
+        keywords=["stripe", "payment"],
+        scope="project",
+    )
+    p.remember(
+        session_id="s1", agent_id="a1", role="impl",
+        content="Redis caching layer",
+        keywords=["redis", "cache"],
+        scope="project",
+    )
+    r = p.recall(
+        session_id="s1", agent_id="a1", role="impl",
+        query="stripe payment integration",
+    )
+    assert len(r.entries) >= 1
+    assert all(isinstance(e, RecallEntry) for e in r.entries)
+    assert all(e.score > 0 for e in r.entries)
+    contents = [e.content for e in r.entries]
+    assert "Stripe needs API keys" in contents
+
+
+def test_recall_scope_filter(tmp_path):
+    p = _make_provider(tmp_path)
+    p.remember(
+        session_id="s1", agent_id="a1", role="impl",
+        content="Project stripe keys",
+        keywords=["stripe"],
+        scope="project",
+    )
+    p.remember(
+        session_id="s1", agent_id="a1", role="impl",
+        content="Global stripe config",
+        keywords=["stripe"],
+        scope="global",
+    )
+    r = p.recall(
+        session_id="s1", agent_id="a1", role="impl",
+        query="stripe",
+        scope="project",
+    )
+    contents = [e.content for e in r.entries]
+    assert "Project stripe keys" in contents
+    assert "Global stripe config" not in contents
+
+
+def test_recall_max_results(tmp_path):
+    p = _make_provider(tmp_path)
+    for i in range(10):
+        p.remember(
+            session_id="s1", agent_id="a1", role="impl",
+            content=f"Fact about deployment step {i}",
+            keywords=["deployment"],
+            scope="project",
+        )
+    r = p.recall(
+        session_id="s1", agent_id="a1", role="impl",
+        query="deployment",
+        max_results=2,
+    )
+    assert len(r.entries) <= 2
+
+
+def test_recall_sm_entries_by_substring(tmp_path):
+    p = _make_provider(tmp_path)
+    p.remember(
+        session_id="s1", agent_id="a1", role="impl",
+        content="Always run pytest before committing",
+        scope="project",
+    )
+    r = p.recall(
+        session_id="s1", agent_id="a1", role="impl",
+        query="pytest",
+    )
+    assert len(r.entries) == 1
+    assert r.entries[0].content == "Always run pytest before committing"
+    assert r.entries[0].score == 1.0
+
+
+def test_recall_no_match(tmp_path):
+    p = _make_provider(tmp_path)
+    p.remember(
+        session_id="s1", agent_id="a1", role="impl",
+        content="Stripe needs API keys",
+        keywords=["stripe", "payment"],
+        scope="project",
+    )
+    r = p.recall(
+        session_id="s1", agent_id="a1", role="impl",
+        query="quantum physics simulation",
+    )
+    assert r.entries == []
 
 
 # -- dump ---------------------------------------------------------------------

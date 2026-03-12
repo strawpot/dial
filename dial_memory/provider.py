@@ -12,10 +12,12 @@ from strawpot_memory.memory_protocol import (
     DumpReceipt,
     GetResult,
     MemoryKind,
+    RecallEntry,
+    RecallResult,
     RememberResult,
 )
 
-from .scorer import score_and_filter
+from .scorer import score_and_filter, score_entry
 from .storage import (
     append_jsonl,
     count_lines,
@@ -195,6 +197,67 @@ class DialMemoryProvider:
         self._known_contents[cache_key].add(content)
         return RememberResult(status="accepted", entry_id=entry_id)
 
+    # -- recall ---------------------------------------------------------------
+
+    def recall(
+        self,
+        *,
+        session_id: str,
+        agent_id: str,
+        role: str,
+        query: str,
+        keywords: list[str] | None = None,
+        scope: str = "",
+        max_results: int = 10,
+    ) -> RecallResult:
+        if scope:
+            entries = self._collect_knowledge_by_scope(scope, role)
+        else:
+            entries = self._collect_knowledge(role)
+
+        # Filter to entries with keywords for scoring
+        kw_entries = [e for e in entries if e.get("keywords")]
+
+        # If explicit keywords provided, narrow to entries matching any of them
+        if keywords:
+            kw_lower = {k.lower() for k in keywords}
+            kw_entries = [
+                e for e in kw_entries
+                if kw_lower & {k.lower() for k in e.get("keywords", [])}
+            ]
+
+        # Also include keyword-less (SM) entries that match the query text
+        sm_entries = [e for e in entries if not e.get("keywords")]
+
+        # Score keyword entries against the query
+        scored = score_and_filter(kw_entries, query, self._rm_min_score)
+
+        # Prepend SM entries (always relevant, score 1.0)
+        result_entries = []
+        for e in sm_entries:
+            if query.lower() in e.get("content", "").lower():
+                result_entries.append(
+                    RecallEntry(
+                        entry_id=e.get("entry_id", ""),
+                        content=e.get("content", ""),
+                        keywords=e.get("keywords", []),
+                        scope=e.get("_scope", "project"),
+                        score=1.0,
+                    )
+                )
+        for e in scored:
+            result_entries.append(
+                RecallEntry(
+                    entry_id=e.get("entry_id", ""),
+                    content=e.get("content", ""),
+                    keywords=e.get("keywords", []),
+                    scope=e.get("_scope", "project"),
+                    score=score_entry(e, query),
+                )
+            )
+
+        return RecallResult(entries=result_entries[:max_results])
+
     # -- internal helpers -----------------------------------------------------
 
     def _collect_em(self, session_id: str) -> list[dict]:
@@ -215,11 +278,29 @@ class DialMemoryProvider:
     def _collect_knowledge(self, role: str) -> list[dict]:
         """Merge knowledge from global, project, and role scopes; deduplicate."""
         global_entries = read_jsonl(knowledge_path(self._global_dir))
+        for e in global_entries:
+            e.setdefault("_scope", "global")
         project_entries = read_jsonl(knowledge_path(self._storage_dir))
+        for e in project_entries:
+            e.setdefault("_scope", "project")
         role_entries = read_jsonl(role_knowledge_path(self._storage_dir, role))
+        for e in role_entries:
+            e.setdefault("_scope", "role")
 
         all_entries = global_entries + project_entries + role_entries
         return _deduplicate(all_entries)
+
+    def _collect_knowledge_by_scope(self, scope: str, role: str) -> list[dict]:
+        """Collect knowledge from a single scope."""
+        if scope == "global":
+            entries = read_jsonl(knowledge_path(self._global_dir))
+        elif scope == "role":
+            entries = read_jsonl(role_knowledge_path(self._storage_dir, role))
+        else:  # "project"
+            entries = read_jsonl(knowledge_path(self._storage_dir))
+        for e in entries:
+            e.setdefault("_scope", scope)
+        return entries
 
     def _knowledge_store_path(self, scope: str, role: str) -> Path:
         """Return the knowledge.jsonl path for the given scope."""

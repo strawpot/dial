@@ -7,7 +7,8 @@ Dial implements the `MemoryProvider` protocol with two memory layers:
 **Event Memory (EM)** for automatic session history and a unified
 **Knowledge store** for facts and domain-specific retrieval. Knowledge
 is scoped at three levels (global, project, role). Agents write
-knowledge through a `remember` RPC on denden.
+knowledge through a `remember` RPC and query it on-demand through a
+`recall` RPC on denden.
 
 ---
 
@@ -74,8 +75,11 @@ strawpot delegation flow
   │
   ├─ [agent runs]
   │   │
-  │   └─ denden remember ──→ memory.remember() ──→ dedup + write
-  │      (real-time, during agent execution)
+  │   ├─ denden remember ──→ memory.remember() ──→ dedup + write
+  │   │  (real-time, during agent execution)
+  │   │
+  │   └─ denden recall   ──→ memory.recall()   ──→ score + filter
+  │      (on-demand query of stored knowledge)
   │
   └─ memory.dump(session_id, agent_id, role, task, status, output, ...)
       │
@@ -88,8 +92,8 @@ strawpot delegation flow
 
 ## Knowledge Write: The `remember` RPC
 
-Agents write knowledge through denden — a new `remember` action
-alongside the existing `delegate` and `ask_user` actions.
+Agents write knowledge through denden — `remember` and `recall`
+actions alongside the existing `delegate` and `ask_user` actions.
 
 ```
 Agent                    DenDen                   StrawPot
@@ -143,10 +147,10 @@ message RememberResult {
 }
 ```
 
-The `DenDenRequest.oneof` gains a `remember` field alongside
-`delegate` and `ask_user`.
+The `DenDenRequest.oneof` gains `remember` and `recall` fields
+alongside `delegate` and `ask_user`.
 
-**strawpot** — Add `remember` method to `MemoryProvider` protocol:
+**strawpot** — Add `remember` and `recall` methods to `MemoryProvider` protocol:
 
 ```python
 class MemoryProvider(Protocol):
@@ -163,13 +167,25 @@ class MemoryProvider(Protocol):
         keywords: list[str] | None = None,
         scope: str = "project",
     ) -> RememberResult: ...
+    def recall(
+        self,
+        *,
+        session_id: str,
+        agent_id: str,
+        role: str,
+        query: str,
+        keywords: list[str] | None = None,
+        scope: str = "",
+        max_results: int = 10,
+    ) -> RecallResult: ...
 ```
 
-`Session._handle_remember` routes the denden callback to
-`memory_provider.remember()`, similar to how `_handle_delegate`
-routes to `handle_delegate()`.
+`Session._handle_remember` and `Session._handle_recall` route the
+denden callbacks to the corresponding `memory_provider` methods,
+similar to how `_handle_delegate` routes to `handle_delegate()`.
 
-**dial** — Implements `remember()` with dedup and direct write.
+**dial** — Implements `remember()` with dedup and direct write, and
+`recall()` with keyword scoring and scope filtering.
 
 ### Agent-Facing UX
 
@@ -440,6 +456,49 @@ def remember(*, session_id, agent_id, role, content, keywords=None, scope="proje
     return RememberResult(status="accepted", entry_id=entry["entry_id"])
 ```
 
+---
+
+## `recall` Flow
+
+```python
+def recall(*, session_id, agent_id, role, query, keywords=None, scope="", max_results=10):
+    # 1. Collect entries (all scopes or a specific scope)
+    if scope:
+        entries = collect_knowledge_by_scope(scope, role)
+    else:
+        entries = collect_all_knowledge(role)  # global + project + role
+
+    # 2. Split into keyword and keyword-less entries
+    kw_entries = [e for e in entries if e["keywords"]]
+    sm_entries = [e for e in entries if not e["keywords"]]
+
+    # 3. Optional keyword filter (narrow before scoring)
+    if keywords:
+        kw_entries = [e for e in kw_entries if any overlap with keywords]
+
+    # 4. Score keyword entries against query
+    scored = score_and_filter(kw_entries, query, rm_min_score)
+
+    # 5. Include SM entries matching query text (substring match, score 1.0)
+    sm_matches = [e for e in sm_entries if query in e["content"]]
+
+    # 6. Combine, cap at max_results
+    return RecallResult(entries=(sm_matches + scored)[:max_results])
+```
+
+The `recall` flow reuses the existing RM scorer. SM entries use
+substring matching since they have no keywords to score against.
+Each returned entry includes its `score` and `scope` so the caller
+can assess relevance.
+
+**When is `recall` useful?** The orchestrator pre-loads context at
+spawn time via `get()`, but an agent's needs may evolve mid-task.
+`recall` lets agents query on-demand without restarting. It also
+helps agents check what's already stored before calling `remember`,
+avoiding duplicates.
+
+---
+
 The `remember()` flow is designed to be extensible. A future gating
 layer (e.g., proposal review) can be inserted between dedup and write
 without changing the `RememberResult` contract — it would return
@@ -527,9 +586,9 @@ repositories:
 
 | Repo | Changes |
 |------|---------|
-| **denden** | Add `RememberRequest`/`RememberResult` to protobuf. Add `on_remember` callback to `DenDenServer`. Add `remember` command to `denden` CLI. |
-| **strawpot** | Add `remember()` to `MemoryProvider` protocol. Add `_handle_remember` to `Session`. Add noop `remember()` to `NoopMemoryProvider`. |
-| **dial** | Implement `remember()` with dedup and direct write. |
+| **denden** | Add `RememberRequest`/`RememberResult`/`RecallPayload`/`RecallResult`/`RecallEntry` to protobuf. Add `on_remember`/`on_recall` callbacks to `DenDenServer`. Update `denden` CLI validation. |
+| **strawpot** | Add `remember()`/`recall()` to `MemoryProvider` protocol. Add `_handle_remember`/`_handle_recall` to `Session`. |
+| **dial** | Implement `remember()` with dedup and direct write. Implement `recall()` with keyword scoring, scope filtering, and SM substring matching. |
 
 The denden CLI change means agents can call `remember` the same way
 they call `delegate` — no wrapper changes needed. The skill that
@@ -542,7 +601,7 @@ teaches agents about denden just needs a new section for `remember`.
 ```
 dial/
   MEMORY.md              Manifest (YAML frontmatter + description)
-  provider.py            MemoryProvider implementation (get + dump + remember)
+  provider.py            MemoryProvider implementation (get + dump + remember + recall)
   storage.py             File I/O: read/write JSONL, atomic writes
   scorer.py              RM keyword relevance scoring
   __init__.py

@@ -35,6 +35,14 @@ denden send '{"remember": {"content": "Payments API needs idempotency keys", "ke
 
 Entries are deduplicated and written directly to the knowledge store.
 
+Agents can query stored knowledge on-demand via the `recall` RPC:
+
+```bash
+denden send '{"recall": {"query": "testing framework", "scope": "project", "maxResults": 5}}'
+```
+
+Results are scored by keyword relevance and returned sorted best-first.
+
 See [DESIGN.md](DESIGN.md) for architecture details.
 
 ## License

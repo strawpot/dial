@@ -67,6 +67,7 @@ class DialMemoryProvider:
         task: str,
         budget: int | None = None,
         parent_agent_id: str | None = None,
+        group_id: str | None = None,
     ) -> GetResult:
         cards: list[ContextCard] = []
         sources: list[str] = []
@@ -137,6 +138,7 @@ class DialMemoryProvider:
         tool_trace: str = "",
         parent_agent_id: str | None = None,
         artifacts: dict[str, str] | None = None,
+        group_id: str | None = None,
     ) -> DumpReceipt:
         event_id = _make_id("evt")
         event = {
@@ -172,6 +174,7 @@ class DialMemoryProvider:
         content: str,
         keywords: list[str] | None = None,
         scope: str = "project",
+        group_id: str | None = None,
     ) -> RememberResult:
         kw = keywords or []
         store_path = self._knowledge_store_path(scope, role)
@@ -218,6 +221,7 @@ class DialMemoryProvider:
         keywords: list[str] | None = None,
         scope: str = "",
         max_results: int = 10,
+        group_id: str | None = None,
     ) -> RecallResult:
         if scope:
             entries = self._collect_knowledge_by_scope(scope, role)

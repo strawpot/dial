@@ -456,9 +456,9 @@ def test_em_failures_prioritised_over_successes(tmp_path):
     )
     em_cards = [c for c in result.context_cards if c.kind == MemoryKind.EM]
     assert len(em_cards) == 1
-    lines = em_cards[0].content.strip().split("\n")
-    # The failure should appear first
-    assert "Broken build" in lines[0]
+    content = em_cards[0].content.strip()
+    # The failure should appear before the success
+    assert content.index("Broken build") < content.index("Unrelated success")
 
 
 def test_em_relevance_scoring(tmp_path):
@@ -483,9 +483,10 @@ def test_em_relevance_scoring(tmp_path):
     )
     em_cards = [c for c in result.context_cards if c.kind == MemoryKind.EM]
     assert len(em_cards) == 1
-    lines = em_cards[0].content.strip().split("\n")
+    content = em_cards[0].content.strip()
     # The payment-related event should be first despite others existing
-    assert "payment" in lines[0].lower()
+    first_entry = content.split("\n\n")[0]
+    assert "payment" in first_entry.lower()
 
 
 def test_em_consolidation_tracks_failure_count(tmp_path):
@@ -534,8 +535,8 @@ def test_em_processing_respects_tail_count(tmp_path):
         behavior_ref="text", task="something",
     )
     em_cards = [c for c in result.context_cards if c.kind == MemoryKind.EM]
-    lines = [l for l in em_cards[0].content.strip().split("\n") if not l.startswith("  ")]
-    assert len(lines) <= 2
+    entries = [e for e in em_cards[0].content.strip().split("\n\n") if e]
+    assert len(entries) <= 2
 
 
 # -- Group-scoped EM (items 21-22) -------------------------------------------

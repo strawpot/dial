@@ -23,12 +23,13 @@ from .storage import (
     append_jsonl,
     count_lines,
     em_dir,
+    em_group_dir,
+    em_group_path,
     em_path,
     expand_path,
     knowledge_path,
     read_em_dir,
     read_jsonl,
-    read_jsonl_tail,
     role_knowledge_path,
     truncate_jsonl,
 )
@@ -49,7 +50,7 @@ class DialMemoryProvider:
         )
         self._em_tail_count: int = int(cfg.get("em_tail_count", 5))
         self._em_max_events: int = int(cfg.get("em_max_events", 10000))
-        self._em_scope: str = cfg.get("em_scope", "project")
+        self._em_scope: str = cfg.get("em_scope", "auto")
         self._rm_min_score: float = float(cfg.get("rm_min_score", 0.3))
         self._simhash_dedup_threshold: int = int(cfg.get("simhash_dedup_threshold", _SIMHASH_DEDUP_THRESHOLD))
         self._known_contents: dict[str, set[str]] = {}   # path -> content set
@@ -100,8 +101,8 @@ class DialMemoryProvider:
             )
             sources.append("rm")
 
-        # 4. EM — recent events (scope: session, project, or global)
-        em_events = self._collect_em(session_id)
+        # 4. EM — recent events (scope: session, group, project, or global)
+        em_events = self._collect_em(session_id, group_id=group_id)
         if em_events:
             processed = _process_em(em_events, task, self._em_tail_count)
             cards.append(
@@ -154,7 +155,10 @@ class DialMemoryProvider:
                 "summary": _extract_summary(output) if output else "",
             },
         }
-        path = em_path(self._storage_dir, session_id)
+        if group_id:
+            path = em_group_path(self._storage_dir, group_id, session_id)
+        else:
+            path = em_path(self._storage_dir, session_id)
         append_jsonl(path, event)
 
         # Rotate if EM file exceeds max events
@@ -273,19 +277,32 @@ class DialMemoryProvider:
 
     # -- internal helpers -----------------------------------------------------
 
-    def _collect_em(self, session_id: str) -> list[dict]:
+    def _resolve_em_scope(self, group_id: str | None) -> str:
+        """Resolve 'auto' em_scope based on group_id presence."""
+        if self._em_scope == "auto":
+            return "group" if group_id else "project"
+        return self._em_scope
+
+    def _collect_em(
+        self, session_id: str, *, group_id: str | None = None
+    ) -> list[dict]:
         """Collect EM events based on configured scope."""
-        if self._em_scope == "session":
-            return read_jsonl_tail(
-                em_path(self._storage_dir, session_id), self._em_tail_count
-            )
-        elif self._em_scope == "global":
+        scope = self._resolve_em_scope(group_id)
+        if scope == "group":
+            if group_id:
+                return read_em_dir(
+                    em_group_dir(self._storage_dir, group_id),
+                    self._em_tail_count,
+                )
+            # group scope without group_id falls back to project
+            return read_em_dir(em_dir(self._storage_dir), self._em_tail_count)
+        elif scope == "global":
             project = read_em_dir(em_dir(self._storage_dir), self._em_tail_count)
             global_ = read_em_dir(em_dir(self._global_dir), self._em_tail_count)
             merged = project + global_
             merged.sort(key=lambda e: e.get("ts", ""), reverse=True)
             return merged[: self._em_tail_count]
-        else:  # "project" (default)
+        else:  # "project"
             return read_em_dir(em_dir(self._storage_dir), self._em_tail_count)
 
     def _collect_knowledge(self, role: str) -> list[dict]:

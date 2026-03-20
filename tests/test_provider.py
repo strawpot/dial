@@ -5,7 +5,7 @@ import json
 from strawpot_memory.memory_protocol import MemoryKind, MemoryProvider, RecallEntry, RecallResult, RememberResult
 
 from dial_memory.provider import DialMemoryProvider
-from dial_memory.storage import knowledge_path, read_jsonl, role_knowledge_path
+from dial_memory.storage import em_group_path, knowledge_path, read_jsonl, role_knowledge_path
 
 
 def _make_provider(tmp_path):
@@ -536,3 +536,146 @@ def test_em_processing_respects_tail_count(tmp_path):
     em_cards = [c for c in result.context_cards if c.kind == MemoryKind.EM]
     lines = em_cards[0].content.strip().split("\n")
     assert len(lines) <= 2
+
+
+# -- Group-scoped EM (items 21-22) -------------------------------------------
+
+
+def test_dump_with_group_id_writes_to_group_dir(tmp_path):
+    """dump() with group_id writes EM to em/groups/{group_id}/{session_id}.jsonl."""
+    p = _make_provider(tmp_path)
+    p.dump(
+        session_id="s1", agent_id="a1", role="impl",
+        behavior_ref="text", task="Build feature",
+        status="success", output="Done",
+        group_id="conv-42",
+    )
+    # Should exist in group dir
+    group_file = em_group_path(tmp_path / "project", "conv-42", "s1")
+    events = read_jsonl(group_file)
+    assert len(events) == 1
+    assert events[0]["data"]["task"] == "Build feature"
+
+    # Should NOT exist in standalone em dir
+    standalone = tmp_path / "project" / "em" / "s1.jsonl"
+    assert not standalone.exists()
+
+
+def test_dump_without_group_id_writes_to_standalone(tmp_path):
+    """dump() without group_id writes to em/{session_id}.jsonl (unchanged)."""
+    p = _make_provider(tmp_path)
+    p.dump(
+        session_id="s1", agent_id="a1", role="impl",
+        behavior_ref="text", task="Standalone task",
+        status="success", output="Done",
+    )
+    standalone = tmp_path / "project" / "em" / "s1.jsonl"
+    events = read_jsonl(standalone)
+    assert len(events) == 1
+
+
+def test_auto_scope_resolves_to_group_when_group_id_set(tmp_path):
+    """With em_scope='auto' (default), group_id triggers group-scoped EM read."""
+    p = _make_provider(tmp_path)
+    # Dump two events in same group, different sessions
+    p.dump(
+        session_id="s1", agent_id="a1", role="impl",
+        behavior_ref="text", task="Task A",
+        status="success", output="Done A",
+        group_id="conv-1",
+    )
+    p.dump(
+        session_id="s2", agent_id="a2", role="impl",
+        behavior_ref="text", task="Task B",
+        status="success", output="Done B",
+        group_id="conv-1",
+    )
+    # Also dump a standalone event (no group) — should NOT be included
+    p.dump(
+        session_id="s3", agent_id="a3", role="impl",
+        behavior_ref="text", task="Standalone",
+        status="success", output="Done standalone",
+    )
+    result = p.get(
+        session_id="s1", agent_id="a1", role="impl",
+        behavior_ref="text", task="Next task",
+        group_id="conv-1",
+    )
+    em_cards = [c for c in result.context_cards if c.kind == MemoryKind.EM]
+    assert len(em_cards) == 1
+    content = em_cards[0].content
+    assert "Task A" in content
+    assert "Task B" in content
+    assert "Standalone" not in content
+
+
+def test_auto_scope_resolves_to_project_when_no_group_id(tmp_path):
+    """With em_scope='auto' (default), no group_id falls back to project scope."""
+    p = _make_provider(tmp_path)
+    p.dump(
+        session_id="s1", agent_id="a1", role="impl",
+        behavior_ref="text", task="Project event",
+        status="success", output="Done",
+    )
+    result = p.get(
+        session_id="s2", agent_id="a2", role="impl",
+        behavior_ref="text", task="Next",
+    )
+    em_cards = [c for c in result.context_cards if c.kind == MemoryKind.EM]
+    assert len(em_cards) == 1
+    assert "Project event" in em_cards[0].content
+
+
+def test_explicit_group_scope_without_group_id_falls_back_to_session(tmp_path):
+    """em_scope='group' without group_id falls back to session scope."""
+    p = DialMemoryProvider({
+        "storage_dir": str(tmp_path / "project"),
+        "global_storage_dir": str(tmp_path / "global"),
+        "em_scope": "group",
+    })
+    # Dump to two sessions (standalone, no group)
+    p.dump(
+        session_id="s1", agent_id="a1", role="impl",
+        behavior_ref="text", task="Session 1 event",
+        status="success", output="Done",
+    )
+    p.dump(
+        session_id="s2", agent_id="a2", role="impl",
+        behavior_ref="text", task="Session 2 event",
+        status="success", output="Done",
+    )
+    # get for s1 without group_id — should only see s1's events
+    result = p.get(
+        session_id="s1", agent_id="a1", role="impl",
+        behavior_ref="text", task="Next",
+    )
+    em_cards = [c for c in result.context_cards if c.kind == MemoryKind.EM]
+    assert len(em_cards) == 1
+    assert "Session 1 event" in em_cards[0].content
+    assert "Session 2 event" not in em_cards[0].content
+
+
+def test_group_isolation_between_groups(tmp_path):
+    """Events in different groups are isolated from each other."""
+    p = _make_provider(tmp_path)
+    p.dump(
+        session_id="s1", agent_id="a1", role="impl",
+        behavior_ref="text", task="Group A event",
+        status="success", output="Done",
+        group_id="group-a",
+    )
+    p.dump(
+        session_id="s2", agent_id="a2", role="impl",
+        behavior_ref="text", task="Group B event",
+        status="success", output="Done",
+        group_id="group-b",
+    )
+    result = p.get(
+        session_id="s1", agent_id="a1", role="impl",
+        behavior_ref="text", task="Next",
+        group_id="group-a",
+    )
+    em_cards = [c for c in result.context_cards if c.kind == MemoryKind.EM]
+    assert len(em_cards) == 1
+    assert "Group A event" in em_cards[0].content
+    assert "Group B event" not in em_cards[0].content

@@ -78,6 +78,16 @@ def role_knowledge_path(storage_dir: Path, role: str) -> Path:
     return storage_dir / "knowledge" / "roles" / role / "knowledge.jsonl"
 
 
+def em_group_dir(storage_dir: Path, group_id: str) -> Path:
+    """Path to the EM directory for a specific group."""
+    return storage_dir / "em" / "groups" / group_id
+
+
+def em_group_path(storage_dir: Path, group_id: str, session_id: str) -> Path:
+    """Path to the EM event log for a session within a group."""
+    return em_group_dir(storage_dir, group_id) / f"{session_id}.jsonl"
+
+
 def em_dir(storage_dir: Path) -> Path:
     """Path to the EM event directory."""
     return storage_dir / "em"

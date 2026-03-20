@@ -30,7 +30,6 @@ from .storage import (
     knowledge_path,
     read_em_dir,
     read_jsonl,
-    read_jsonl_tail,
     role_knowledge_path,
     truncate_jsonl,
 )
@@ -289,20 +288,14 @@ class DialMemoryProvider:
     ) -> list[dict]:
         """Collect EM events based on configured scope."""
         scope = self._resolve_em_scope(group_id)
-        if scope == "session":
-            return read_jsonl_tail(
-                em_path(self._storage_dir, session_id), self._em_tail_count
-            )
-        elif scope == "group":
+        if scope == "group":
             if group_id:
                 return read_em_dir(
                     em_group_dir(self._storage_dir, group_id),
                     self._em_tail_count,
                 )
-            # group scope without group_id falls back to session
-            return read_jsonl_tail(
-                em_path(self._storage_dir, session_id), self._em_tail_count
-            )
+            # group scope without group_id falls back to project
+            return read_em_dir(em_dir(self._storage_dir), self._em_tail_count)
         elif scope == "global":
             project = read_em_dir(em_dir(self._storage_dir), self._em_tail_count)
             global_ = read_em_dir(em_dir(self._global_dir), self._em_tail_count)

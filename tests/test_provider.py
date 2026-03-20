@@ -626,8 +626,8 @@ def test_auto_scope_resolves_to_project_when_no_group_id(tmp_path):
     assert "Project event" in em_cards[0].content
 
 
-def test_explicit_group_scope_without_group_id_falls_back_to_session(tmp_path):
-    """em_scope='group' without group_id falls back to session scope."""
+def test_explicit_group_scope_without_group_id_falls_back_to_project(tmp_path):
+    """em_scope='group' without group_id falls back to project scope."""
     p = DialMemoryProvider({
         "storage_dir": str(tmp_path / "project"),
         "global_storage_dir": str(tmp_path / "global"),
@@ -644,7 +644,7 @@ def test_explicit_group_scope_without_group_id_falls_back_to_session(tmp_path):
         behavior_ref="text", task="Session 2 event",
         status="success", output="Done",
     )
-    # get for s1 without group_id — should only see s1's events
+    # get for s1 without group_id — should see all project events
     result = p.get(
         session_id="s1", agent_id="a1", role="impl",
         behavior_ref="text", task="Next",
@@ -652,7 +652,7 @@ def test_explicit_group_scope_without_group_id_falls_back_to_session(tmp_path):
     em_cards = [c for c in result.context_cards if c.kind == MemoryKind.EM]
     assert len(em_cards) == 1
     assert "Session 1 event" in em_cards[0].content
-    assert "Session 2 event" not in em_cards[0].content
+    assert "Session 2 event" in em_cards[0].content
 
 
 def test_group_isolation_between_groups(tmp_path):

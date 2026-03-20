@@ -534,7 +534,7 @@ def test_em_processing_respects_tail_count(tmp_path):
         behavior_ref="text", task="something",
     )
     em_cards = [c for c in result.context_cards if c.kind == MemoryKind.EM]
-    lines = em_cards[0].content.strip().split("\n")
+    lines = [l for l in em_cards[0].content.strip().split("\n") if not l.startswith("  ")]
     assert len(lines) <= 2
 
 

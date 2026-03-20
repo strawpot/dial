@@ -23,8 +23,8 @@ metadata:
         description: Max events per session before rotation
       em_scope:
         type: string
-        default: project
-        description: "EM retrieval scope: session (current only), project (all sessions in project), or global (all sessions everywhere)"
+        default: auto
+        description: "EM retrieval scope: auto (group when group_id present, else project), session, project, group, or global"
       rm_min_score:
         type: float
         default: 0.3

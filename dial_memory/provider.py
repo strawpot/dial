@@ -508,9 +508,9 @@ def _format_em(events: list[dict]) -> str:
                 line += f", {failure_count} failed"
             line += "]"
         if summary and summary != task:
-            line += f"\n  {summary[:200]}"
+            line += f"\n{summary[:200]}"
         lines.append(line)
-    return "\n".join(lines)
+    return "\n\n".join(lines)
 
 
 def _trim_to_budget(cards: list[ContextCard], budget: int) -> list[ContextCard]:

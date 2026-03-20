@@ -508,7 +508,7 @@ def _format_em(events: list[dict]) -> str:
                 line += f", {failure_count} failed"
             line += "]"
         if summary and summary != task:
-            line += f": {summary[:200]}"
+            line += f"\n  {summary[:200]}"
         lines.append(line)
     return "\n".join(lines)
 

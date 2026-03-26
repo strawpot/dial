@@ -8,6 +8,7 @@ from dial_memory.storage import (
     knowledge_path,
     read_jsonl,
     read_jsonl_tail,
+    rewrite_jsonl,
     role_knowledge_path,
     truncate_jsonl,
 )
@@ -108,7 +109,6 @@ def test_truncate_jsonl_missing_file(tmp_path):
 
 
 def test_rewrite_jsonl_replaces_content(tmp_path):
-    from dial_memory.storage import rewrite_jsonl
 
     path = tmp_path / "data.jsonl"
     append_jsonl(path, {"a": 1})
@@ -119,7 +119,6 @@ def test_rewrite_jsonl_replaces_content(tmp_path):
 
 
 def test_rewrite_jsonl_creates_parent_dirs(tmp_path):
-    from dial_memory.storage import rewrite_jsonl
 
     path = tmp_path / "sub" / "dir" / "data.jsonl"
     rewrite_jsonl(path, [{"x": 1}])
@@ -129,7 +128,6 @@ def test_rewrite_jsonl_creates_parent_dirs(tmp_path):
 
 def test_rewrite_jsonl_atomic(tmp_path):
     """rewrite_jsonl uses atomic replacement — no partial writes."""
-    from dial_memory.storage import rewrite_jsonl
 
     path = tmp_path / "data.jsonl"
     original = [{"i": i} for i in range(3)]

@@ -287,45 +287,17 @@ class DialMemoryProvider:
         entry_id: str,
         scope: str = "",
     ) -> ForgetResult:
-        if scope:
-            paths = [self._knowledge_store_path(scope, "")]
-        else:
-            paths = [
-                knowledge_path(self._global_dir),
-                knowledge_path(self._storage_dir),
-            ]
+        paths = self._forget_candidate_paths(scope)
 
         for store_path in paths:
             entries = read_jsonl(store_path)
             remaining = [e for e in entries if e.get("entry_id") != entry_id]
             if len(remaining) < len(entries):
                 rewrite_jsonl(store_path, remaining)
-                # Invalidate in-memory caches for this path
                 cache_key = str(store_path)
                 self._known_contents.pop(cache_key, None)
                 self._known_hashes.pop(cache_key, None)
                 return ForgetResult(status="deleted", entry_id=entry_id)
-
-        # Also search all role knowledge directories
-        if not scope or scope == "role":
-            roles_dir = self._storage_dir / "knowledge" / "roles"
-            if roles_dir.is_dir():
-                for role_dir in sorted(roles_dir.iterdir()):
-                    if not role_dir.is_dir():
-                        continue
-                    store_path = role_knowledge_path(
-                        self._storage_dir, role_dir.name
-                    )
-                    entries = read_jsonl(store_path)
-                    remaining = [
-                        e for e in entries if e.get("entry_id") != entry_id
-                    ]
-                    if len(remaining) < len(entries):
-                        rewrite_jsonl(store_path, remaining)
-                        cache_key = str(store_path)
-                        self._known_contents.pop(cache_key, None)
-                        self._known_hashes.pop(cache_key, None)
-                        return ForgetResult(status="deleted", entry_id=entry_id)
 
         return ForgetResult(status="not_found", entry_id=entry_id)
 
@@ -347,7 +319,7 @@ class DialMemoryProvider:
         total_count = len(entries)
         page = entries[offset : offset + limit]
 
-        list_entries = [
+        items = [
             ListEntry(
                 entry_id=e.get("entry_id", ""),
                 content=e.get("content", ""),
@@ -358,7 +330,7 @@ class DialMemoryProvider:
             for e in page
         ]
 
-        return ListResult(entries=list_entries, total_count=total_count)
+        return ListResult(entries=items, total_count=total_count)
 
     # -- internal helpers -----------------------------------------------------
 
@@ -416,6 +388,27 @@ class DialMemoryProvider:
         for e in entries:
             e.setdefault("_scope", scope)
         return entries
+
+    def _forget_candidate_paths(self, scope: str) -> list[Path]:
+        """Return knowledge store paths to search when forgetting an entry."""
+        if scope and scope != "role":
+            return [self._knowledge_store_path(scope, "")]
+
+        paths: list[Path] = []
+        if scope == "role":
+            paths.append(self._knowledge_store_path("role", ""))
+        else:
+            paths.extend([
+                knowledge_path(self._global_dir),
+                knowledge_path(self._storage_dir),
+            ])
+        # Include all role knowledge directories
+        roles_dir = self._storage_dir / "knowledge" / "roles"
+        if roles_dir.is_dir():
+            for role_dir in sorted(roles_dir.iterdir()):
+                if role_dir.is_dir():
+                    paths.append(role_knowledge_path(self._storage_dir, role_dir.name))
+        return paths
 
     def _knowledge_store_path(self, scope: str, role: str) -> Path:
         """Return the knowledge.jsonl path for the given scope."""

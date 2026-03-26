@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from collections import deque
 from pathlib import Path
 
@@ -131,3 +132,26 @@ def truncate_jsonl(path: Path, keep: int) -> None:
     with open(path, "w", encoding="utf-8") as f:
         for line in buf:
             f.write(line + "\n")
+
+
+def rewrite_jsonl(path: Path, entries: list[dict]) -> None:
+    """Atomically rewrite a JSONL file with the given entries.
+
+    Uses a temp file + ``os.replace()`` so readers never see a partial file.
+    """
+    ensure_dir(path.parent)
+    fd, tmp = tempfile.mkstemp(
+        dir=path.parent, prefix=".tmp_", suffix=".jsonl"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            for entry in entries:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        os.replace(tmp, path)
+    except BaseException:
+        # Clean up temp file on failure
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise

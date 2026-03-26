@@ -11,7 +11,10 @@ from strawpot_memory.memory_protocol import (
     ContextCard,
     ControlSignal,
     DumpReceipt,
+    ForgetResult,
     GetResult,
+    ListEntry,
+    ListResult,
     MemoryKind,
     RecallEntry,
     RecallResult,
@@ -30,6 +33,7 @@ from .storage import (
     knowledge_path,
     read_em_dir,
     read_jsonl,
+    rewrite_jsonl,
     role_knowledge_path,
     truncate_jsonl,
 )
@@ -274,6 +278,87 @@ class DialMemoryProvider:
             )
 
         return RecallResult(entries=result_entries[:max_results])
+
+    # -- forget ---------------------------------------------------------------
+
+    def forget(
+        self,
+        *,
+        entry_id: str,
+        scope: str = "",
+    ) -> ForgetResult:
+        if scope:
+            paths = [self._knowledge_store_path(scope, "")]
+        else:
+            paths = [
+                knowledge_path(self._global_dir),
+                knowledge_path(self._storage_dir),
+            ]
+
+        for store_path in paths:
+            entries = read_jsonl(store_path)
+            remaining = [e for e in entries if e.get("entry_id") != entry_id]
+            if len(remaining) < len(entries):
+                rewrite_jsonl(store_path, remaining)
+                # Invalidate in-memory caches for this path
+                cache_key = str(store_path)
+                self._known_contents.pop(cache_key, None)
+                self._known_hashes.pop(cache_key, None)
+                return ForgetResult(status="deleted", entry_id=entry_id)
+
+        # Also search all role knowledge directories
+        if not scope or scope == "role":
+            roles_dir = self._storage_dir / "knowledge" / "roles"
+            if roles_dir.is_dir():
+                for role_dir in sorted(roles_dir.iterdir()):
+                    if not role_dir.is_dir():
+                        continue
+                    store_path = role_knowledge_path(
+                        self._storage_dir, role_dir.name
+                    )
+                    entries = read_jsonl(store_path)
+                    remaining = [
+                        e for e in entries if e.get("entry_id") != entry_id
+                    ]
+                    if len(remaining) < len(entries):
+                        rewrite_jsonl(store_path, remaining)
+                        cache_key = str(store_path)
+                        self._known_contents.pop(cache_key, None)
+                        self._known_hashes.pop(cache_key, None)
+                        return ForgetResult(status="deleted", entry_id=entry_id)
+
+        return ForgetResult(status="not_found", entry_id=entry_id)
+
+    # -- list_entries ---------------------------------------------------------
+
+    def list_entries(
+        self,
+        *,
+        scope: str = "",
+        role: str = "",
+        limit: int = 100,
+        offset: int = 0,
+    ) -> ListResult:
+        if scope:
+            entries = self._collect_knowledge_by_scope(scope, role)
+        else:
+            entries = self._collect_knowledge(role)
+
+        total_count = len(entries)
+        page = entries[offset : offset + limit]
+
+        list_entries = [
+            ListEntry(
+                entry_id=e.get("entry_id", ""),
+                content=e.get("content", ""),
+                keywords=e.get("keywords", []),
+                scope=e.get("_scope", ""),
+                ts=e.get("ts", ""),
+            )
+            for e in page
+        ]
+
+        return ListResult(entries=list_entries, total_count=total_count)
 
     # -- internal helpers -----------------------------------------------------
 

@@ -680,3 +680,181 @@ def test_group_isolation_between_groups(tmp_path):
     assert len(em_cards) == 1
     assert "Group A event" in em_cards[0].content
     assert "Group B event" not in em_cards[0].content
+
+
+# -- forget -------------------------------------------------------------------
+
+
+def test_forget_deletes_entry(tmp_path):
+    """forget() removes the entry and returns 'deleted'."""
+    p = _make_provider(tmp_path)
+    r = p.remember(
+        session_id="s1", agent_id="a1", role="impl",
+        content="Temporary fact", scope="project",
+    )
+    result = p.forget(entry_id=r.entry_id)
+    assert result.status == "deleted"
+    assert result.entry_id == r.entry_id
+    # Verify entry is gone from file
+    entries = read_jsonl(knowledge_path(tmp_path / "project"))
+    assert not any(e["entry_id"] == r.entry_id for e in entries)
+
+
+def test_forget_not_found(tmp_path):
+    """forget() returns 'not_found' for non-existent IDs."""
+    p = _make_provider(tmp_path)
+    result = p.forget(entry_id="k_nonexistent")
+    assert result.status == "not_found"
+    assert result.entry_id == "k_nonexistent"
+
+
+def test_forget_clears_cache(tmp_path):
+    """forget() invalidates the in-memory dedup cache."""
+    p = _make_provider(tmp_path)
+    r = p.remember(
+        session_id="s1", agent_id="a1", role="impl",
+        content="Cache test fact", scope="project",
+    )
+    # Verify cache is populated
+    cache_key = str(knowledge_path(tmp_path / "project"))
+    assert cache_key in p._known_contents
+
+    p.forget(entry_id=r.entry_id)
+
+    # Cache should be cleared for this path
+    assert cache_key not in p._known_contents
+    assert cache_key not in p._known_hashes
+
+
+def test_forget_with_scope_filter(tmp_path):
+    """forget(scope='global') only searches global scope."""
+    p = _make_provider(tmp_path)
+    r_project = p.remember(
+        session_id="s1", agent_id="a1", role="impl",
+        content="Project only", scope="project",
+    )
+    # Try to forget in global scope — should not find it
+    result = p.forget(entry_id=r_project.entry_id, scope="global")
+    assert result.status == "not_found"
+
+    # Without scope filter — should find it
+    result = p.forget(entry_id=r_project.entry_id)
+    assert result.status == "deleted"
+
+
+def test_forget_across_scopes(tmp_path):
+    """forget() searches global, project, and role scopes when scope=''."""
+    p = _make_provider(tmp_path)
+    r_global = p.remember(
+        session_id="s1", agent_id="a1", role="impl",
+        content="Global fact", scope="global",
+    )
+    r_role = p.remember(
+        session_id="s1", agent_id="a1", role="impl",
+        content="Role fact", scope="role",
+    )
+    # Forget global entry
+    result = p.forget(entry_id=r_global.entry_id)
+    assert result.status == "deleted"
+    # Forget role entry
+    result = p.forget(entry_id=r_role.entry_id)
+    assert result.status == "deleted"
+
+
+def test_forget_preserves_other_entries(tmp_path):
+    """forget() only removes the targeted entry, preserves others."""
+    p = _make_provider(tmp_path)
+    r1 = p.remember(
+        session_id="s1", agent_id="a1", role="impl",
+        content="Keep this", scope="project",
+    )
+    r2 = p.remember(
+        session_id="s1", agent_id="a1", role="impl",
+        content="Delete this", scope="project",
+    )
+    p.forget(entry_id=r2.entry_id)
+    entries = read_jsonl(knowledge_path(tmp_path / "project"))
+    assert len(entries) == 1
+    assert entries[0]["entry_id"] == r1.entry_id
+
+
+# -- list_entries -------------------------------------------------------------
+
+
+def test_list_entries_all_scopes(tmp_path):
+    """list_entries() returns entries from all scopes when scope=''."""
+    p = _make_provider(tmp_path)
+    p.remember(session_id="s1", agent_id="a1", role="impl",
+               content="Global", scope="global")
+    p.remember(session_id="s1", agent_id="a1", role="impl",
+               content="Project", scope="project")
+    p.remember(session_id="s1", agent_id="a1", role="impl",
+               content="Role", scope="role")
+    result = p.list_entries(role="impl")
+    assert result.total_count == 3
+    assert len(result.entries) == 3
+    contents = {e.content for e in result.entries}
+    assert contents == {"Global", "Project", "Role"}
+
+
+def test_list_entries_single_scope(tmp_path):
+    """list_entries(scope='project') only returns project entries."""
+    p = _make_provider(tmp_path)
+    p.remember(session_id="s1", agent_id="a1", role="impl",
+               content="Global", scope="global")
+    p.remember(session_id="s1", agent_id="a1", role="impl",
+               content="Project", scope="project")
+    result = p.list_entries(scope="project")
+    assert result.total_count == 1
+    assert result.entries[0].content == "Project"
+    assert result.entries[0].scope == "project"
+
+
+def test_list_entries_pagination(tmp_path):
+    """list_entries() supports limit/offset pagination."""
+    p = _make_provider(tmp_path)
+    # Use very distinct content to avoid SimHash dedup
+    distinct_facts = [
+        "Python is a programming language used for web development",
+        "Kubernetes orchestrates container deployments at scale",
+        "PostgreSQL handles relational database management efficiently",
+        "Redis provides in-memory key-value caching solutions",
+        "Terraform automates cloud infrastructure provisioning workflows",
+    ]
+    for content in distinct_facts:
+        p.remember(
+            session_id="s1", agent_id="a1", role="impl",
+            content=content, scope="project",
+        )
+    # Get page 2 (offset=2, limit=2)
+    result = p.list_entries(scope="project", limit=2, offset=2)
+    assert result.total_count == 5
+    assert len(result.entries) == 2
+    assert result.entries[0].content == distinct_facts[2]
+    assert result.entries[1].content == distinct_facts[3]
+
+
+def test_list_entries_empty_store(tmp_path):
+    """list_entries() returns empty result when no entries exist."""
+    p = _make_provider(tmp_path)
+    result = p.list_entries()
+    assert result.total_count == 0
+    assert result.entries == []
+
+
+def test_list_entries_fields_populated(tmp_path):
+    """list_entries() returns ListEntry objects with all fields populated."""
+    p = _make_provider(tmp_path)
+    p.remember(
+        session_id="s1", agent_id="a1", role="impl",
+        content="Test knowledge", keywords=["test", "knowledge"],
+        scope="project",
+    )
+    result = p.list_entries(scope="project")
+    assert len(result.entries) == 1
+    entry = result.entries[0]
+    assert entry.entry_id.startswith("k_")
+    assert entry.content == "Test knowledge"
+    assert entry.keywords == ["test", "knowledge"]
+    assert entry.scope == "project"
+    assert entry.ts != ""  # Has a timestamp

@@ -102,3 +102,41 @@ def test_truncate_jsonl(tmp_path):
 
 def test_truncate_jsonl_missing_file(tmp_path):
     truncate_jsonl(tmp_path / "nope.jsonl", 5)  # should not raise
+
+
+# -- rewrite_jsonl ------------------------------------------------------------
+
+
+def test_rewrite_jsonl_replaces_content(tmp_path):
+    from dial_memory.storage import rewrite_jsonl
+
+    path = tmp_path / "data.jsonl"
+    append_jsonl(path, {"a": 1})
+    append_jsonl(path, {"a": 2})
+    rewrite_jsonl(path, [{"a": 3}])
+    records = read_jsonl(path)
+    assert records == [{"a": 3}]
+
+
+def test_rewrite_jsonl_creates_parent_dirs(tmp_path):
+    from dial_memory.storage import rewrite_jsonl
+
+    path = tmp_path / "sub" / "dir" / "data.jsonl"
+    rewrite_jsonl(path, [{"x": 1}])
+    records = read_jsonl(path)
+    assert records == [{"x": 1}]
+
+
+def test_rewrite_jsonl_atomic(tmp_path):
+    """rewrite_jsonl uses atomic replacement — no partial writes."""
+    from dial_memory.storage import rewrite_jsonl
+
+    path = tmp_path / "data.jsonl"
+    original = [{"i": i} for i in range(3)]
+    rewrite_jsonl(path, original)
+
+    # Rewrite with new content
+    new = [{"i": 10}, {"i": 20}]
+    rewrite_jsonl(path, new)
+    records = read_jsonl(path)
+    assert records == new

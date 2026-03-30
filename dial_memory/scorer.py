@@ -39,6 +39,10 @@ class BM25:
     def __init__(self, corpus: list[list[str]]) -> None:
         n = len(corpus)
         self._avgdl = sum(len(doc) for doc in corpus) / n if n else 1.0
+        # Guard against all-empty-doc corpus: avgdl=0 causes ZeroDivisionError
+        # in score(). Default to 1.0 so BM25 degrades gracefully (tf dominates).
+        if self._avgdl == 0.0:
+            self._avgdl = 1.0
 
         # Document frequency: how many docs contain each term
         df: dict[str, int] = {}

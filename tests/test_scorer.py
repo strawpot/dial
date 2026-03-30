@@ -76,6 +76,18 @@ def test_bm25_empty_corpus():
     assert bm25.score(tokenize("anything"), tokenize("anything")) == 0.0
 
 
+def test_bm25_all_empty_docs_no_zero_division():
+    """Regression: corpus with entries but all-empty token lists caused ZeroDivisionError."""
+    bm25 = BM25([[], [], []])
+    assert bm25.score(tokenize("hello"), []) == 0.0
+
+
+def test_bm25_mixed_empty_and_nonempty_docs():
+    corpus = [[], tokenize("hello world"), []]
+    bm25 = BM25(corpus)
+    assert bm25.score(tokenize("hello"), tokenize("hello world")) > 0
+
+
 def test_bm25_empty_query():
     corpus = [tokenize("fix payment")]
     bm25 = BM25(corpus)

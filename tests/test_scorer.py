@@ -77,7 +77,7 @@ def test_bm25_empty_corpus():
 
 
 def test_bm25_all_empty_docs_no_zero_division():
-    """Regression: corpus with entries but all-empty token lists caused ZeroDivisionError."""
+    """Regression: all-empty token lists made avgdl=0, causing ZeroDivisionError in score()."""
     bm25 = BM25([[], [], []])
     assert bm25.score(tokenize("hello"), []) == 0.0
 
@@ -173,6 +173,30 @@ def test_score_and_filter_no_keywords_skipped():
     entries = [{"content": "a", "keywords": []}]
     result = score_and_filter(entries, "Fix payment", min_score=0.0)
     assert result == []
+
+
+def test_score_and_filter_all_stopword_keywords_no_crash():
+    """Regression: entries whose keywords are all stop words tokenize to empty lists."""
+    entries = [
+        {"content": "a", "keywords": ["the", "and", "is"]},
+        {"content": "b", "keywords": ["a", "an", "or"]},
+    ]
+    result = score_and_filter(entries, "Fix payment", min_score=0.0)
+    assert result == []
+
+
+def test_score_and_filter_mixed_empty_and_valid_keywords():
+    """Regression: mix of empty-keyword and valid-keyword entries should score without error."""
+    entries = [
+        {"content": "a", "keywords": []},
+        {"content": "b", "keywords": ["payment", "stripe"]},
+        {"content": "c", "keywords": ["the", "and"]},
+    ]
+    result = score_and_filter(entries, "Fix payment stripe", min_score=0.0)
+    contents = [e["content"] for _, e in result]
+    assert "b" in contents
+    assert "a" not in contents  # empty keywords skipped
+    assert "c" not in contents  # stop-word-only skipped
 
 
 # -- score_entry (compat shim) ------------------------------------------------

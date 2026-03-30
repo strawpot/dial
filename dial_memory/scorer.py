@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import re
+
+_log = logging.getLogger(__name__)
 
 # Common English stop words to ignore during tokenization.
 _STOP_WORDS = frozenset(
@@ -39,7 +42,10 @@ class BM25:
     def __init__(self, corpus: list[list[str]]) -> None:
         n = len(corpus)
         # Default to 1.0 when corpus is empty or all docs are empty (avoids ZeroDivisionError).
-        self._avgdl = (sum(len(doc) for doc in corpus) / n if n else 0.0) or 1.0
+        raw_avgdl = sum(len(doc) for doc in corpus) / n if n else 0.0
+        if n and raw_avgdl == 0.0:
+            _log.warning("BM25: all %d docs tokenized to empty lists; scores will be uninformative", n)
+        self._avgdl = raw_avgdl or 1.0
 
         # Document frequency: how many docs contain each term
         df: dict[str, int] = {}
